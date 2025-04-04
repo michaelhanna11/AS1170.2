@@ -533,7 +533,9 @@ def generate_pdf_report(inputs, results, project_number, project_name):
 def main():
     st.title("Wind Load Calculator (AS/NZS 1170.2:2021)")
     calculator = WindLoadCalculator()
-    st.set_page_config(page_title="My Page Title",)
+   st.set_page_config(
+        page_title="My Page Title",
+)
 
     
 
