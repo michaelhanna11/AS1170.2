@@ -534,7 +534,7 @@ def main():
     st.title("Wind Load Calculator (AS/NZS 1170.2:2021)")
     calculator = WindLoadCalculator()
 
-    st.set_page_config(page_title="Wind Load Calculator (AS/NZS 1170.2:2021)", layout="wide")
+    
 
     with st.form(key='wind_load_form'):
         # Project details
