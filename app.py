@@ -11,6 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
+from io import BytesIO
 
 # Program details
 PROGRAM_VERSION = "1.0 - 2025"
@@ -30,8 +31,6 @@ def load_logo(url):
 
 # Load logo (try primary URL first, then fallback)
 logo = load_logo(LOGO_URL) or load_logo(FALLBACK_LOGO_URL)
-
-
 
 # WindLoadCalculator class (unchanged)
 class WindLoadCalculator:
@@ -275,7 +274,7 @@ class WindLoadCalculator:
             pressures.append(p)
         return heights, V_des_values, pressures
 
-# PDF generation functions (unchanged)
+# PDF generation functions
 def build_elements(inputs, results, project_number, project_name):
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(name='TitleStyle', parent=styles['Title'], fontSize=16, spaceAfter=6, alignment=1)
@@ -406,6 +405,7 @@ def build_elements(inputs, results, project_number, project_name):
         ["Importance Level (ULS)", inputs['importance_level']],
         ["Terrain Category", inputs['terrain_category']],
         ["Reference Height (h, m)", f"{inputs['reference_height']:.2f}"],
+        ["Construction Period", inputs['construction_period']],
         ["Structure Type", inputs['structure_type']],
     ]
     if structure_type == "Free Standing Wall":
@@ -545,13 +545,11 @@ def main():
     st.set_page_config(page_title="Wind Load Calculator - AS/NZS 1170.2:2021")
 
     # Logo display
-if logo:
-    st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-    st.image(logo, width=200)  # Adjust width as needed
-    st.markdown('</div>', unsafe_allow_html=True)
+    if logo:
+        st.markdown('<div class="logo-container">', unsafe_allow_html=True)
+        st.image(logo, width=200)  # Adjust width as needed
+        st.markdown('</div>', unsafe_allow_html=True)
 
-
-    
     st.title("Wind Load Calculator (AS/NZS 1170.2:2021)")
     calculator = WindLoadCalculator()
 
@@ -559,6 +557,13 @@ if logo:
         # Project details
         project_number = st.text_input("Project Number", value="PRJ-001")
         project_name = st.text_input("Project Name", value="Sample Project")
+        
+        # Add construction period selection
+        construction_period = st.selectbox(
+            "Construction Period",
+            ["1 week", "1 month", "6 months", "More than 6 months"],
+            index=2  # Default to 6 months
+        )
 
         # Location
         st.subheader("Location")
@@ -614,7 +619,8 @@ if logo:
             'b': b,
             'c': c,
             'has_return_corner': has_return_corner,
-            'user_C_shp': user_C_shp
+            'user_C_shp': user_C_shp,
+            'construction_period': construction_period
         }
 
         limit_states = ["ULS", "SLS"]
