@@ -116,9 +116,18 @@ class WindLoadCalculator:
         else:
             return V_R_200km
 
-    def determine_V_R(self, region, limit_state, importance_level=None, distance_from_coast_km=None, construction_period=None):
+    def determine_V_R(self, region, limit_state, importance_level=None, distance_from_coast_km=None, construction_period=None, reference_height=None):
         if limit_state == "SLS":
-            return 16.0, 1.0  # No reduction for SLS, return reduction factor as 1.0
+            # Calculate V_R for SLS using Equation 3.2(1): V(z) = [(z/10)^0.14 + 0.4] * V_mean
+            V_mean = 16.0  # Mean wind speed for SLS as per the standard
+            if reference_height is not None:
+                V_R = ((reference_height / 10) ** 0.14 + 0.4) * V_mean
+            else:
+                V_R = 16.0  # Fallback if reference height not provided
+            reduction_factor = 1.0  # No reduction for SLS
+            return V_R, reduction_factor
+        
+        # ULS calculation remains the same
         R_map = {"I": 25, "II": 100, "III": 250}
         if importance_level not in R_map:
             raise ValueError("Importance level must be 'I', 'II', or 'III' for ULS.")
@@ -288,7 +297,7 @@ class WindLoadCalculator:
         heights = np.sort(heights)
         V_des_values = []
         pressures = []
-        V_R = self.determine_V_R(region, limit_state, importance_level, distance_from_coast_km)[0]  # Only need V_R, not reduction factor here
+        V_R = self.determine_V_R(region, limit_state, importance_level, distance_from_coast_km, reference_height=reference_height)[0]  # Only need V_R
         M_d = self.determine_M_d(region)
         M_c = self.determine_M_c(region)
         M_s = self.determine_M_s(region)
@@ -309,6 +318,7 @@ def build_elements(inputs, results, project_number, project_name):
     subtitle_style = ParagraphStyle(name='SubtitleStyle', parent=styles['Normal'], fontSize=10, spaceAfter=6, alignment=1)
     heading_style = ParagraphStyle(name='HeadingStyle', parent=styles['Heading2'], fontSize=12, spaceAfter=4)
     normal_style = ParagraphStyle(name='NormalStyle', parent=styles['Normal'], fontSize=9, spaceAfter=4)
+    bold_style = ParagraphStyle(name='BoldStyle', parent=styles['Normal'], fontSize=9, spaceAfter=4, fontName='Helvetica-Bold')
     justified_style = ParagraphStyle(name='JustifiedStyle', parent=styles['Normal'], fontSize=9, spaceAfter=4, alignment=TA_JUSTIFY)
     table_header_style = ParagraphStyle(name='TableHeaderStyle', parent=styles['Normal'], fontSize=9, fontName='Helvetica-Bold', alignment=TA_LEFT)
     table_cell_style = ParagraphStyle(name='TableCellStyle', parent=styles['Normal'], fontSize=8, alignment=TA_LEFT, leading=9)
@@ -460,12 +470,15 @@ def build_elements(inputs, results, project_number, project_name):
         data = results[limit_state]
         elements.append(Paragraph(f"Limit State: {limit_state}", heading_style))
         elements.append(Paragraph(f"Regional Wind Speed (<i>V<sub>R</sub></i>): {data['V_R']:.2f} m/s", normal_style))
-        # Add reduction factor text
-        reduction_factor = data.get('reduction_factor', 1.0)
-        if reduction_factor != 1.0:
-            elements.append(Paragraph(f"Reduction Factor Applied (based on construction duration): {reduction_factor:.2f}", normal_style))
+        # Add reduction factor text (for ULS only)
+        if limit_state == "ULS":
+            reduction_factor = data.get('reduction_factor', 1.0)
+            if reduction_factor != 1.0:
+                elements.append(Paragraph(f"Reduction Factor Applied (based on construction duration): {reduction_factor:.2f}", normal_style))
+            else:
+                elements.append(Paragraph("No reduction factor applied (construction duration > 6 months)", normal_style))
         else:
-            elements.append(Paragraph("No reduction factor applied (construction duration > 6 months or SLS)", normal_style))
+            elements.append(Paragraph("No reduction factor applied (SLS)", normal_style))
         elements.append(Paragraph(f"Site Wind Speed (<i>V<sub>sit,β</sub></i>): {data['V_sit_beta']:.2f} m/s", normal_style))
         elements.append(Paragraph(f"Design Wind Speed (<i>V<sub>des,θ</sub></i>): {data['V_des_theta']:.2f} m/s", normal_style))
         elements.append(Spacer(1, 4*mm))
@@ -476,30 +489,49 @@ def build_elements(inputs, results, project_number, project_name):
                 theta_data = data['results'][theta]
                 elements.append(Paragraph(f"Wind Direction: θ = {theta}°", normal_style))
                 if theta == 0:
-                    table_data = [[Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
-                                   Paragraph("Eccentricity (e, m)", table_header_style),
-                                   Paragraph("Wind Pressure (p, kPa)", table_header_style),
-                                   Paragraph("Resultant Force (kN)", table_header_style)],
-                                  [Paragraph(f"{theta_data['C_shp']:.3f}", table_cell_style),
-                                   Paragraph(f"{theta_data['e']:.2f}", table_cell_style),
-                                   Paragraph(f"{theta_data['p']:.3f}", table_cell_style),
-                                   Paragraph(f"{theta_data['resultant_force']:.2f}", table_cell_style)]]
-                    result_table = Table(table_data, colWidths=[45*mm, 35*mm, 35*mm, 35*mm])
+                    table_data = [
+                        [
+                            Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                            Paragraph("Eccentricity (e, m)", table_header_style),
+                            Paragraph("<b>Ultimate Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
+                            Paragraph("Service Wind Pressure (p, kPa) (SLS)", table_header_style),
+                            Paragraph("Resultant Force (kN) (ULS)", table_header_style),
+                            Paragraph("Resultant Force (kN) (SLS)", table_header_style)
+                        ],
+                        [
+                            Paragraph(f"{theta_data['C_shp']:.3f}", table_cell_style),
+                            Paragraph(f"{theta_data['e']:.2f}", table_cell_style),
+                            Paragraph(f"{theta_data['p_uls']:.3f}", table_cell_style),
+                            Paragraph(f"{theta_data['p_sls']:.3f}", table_cell_style),
+                            Paragraph(f"{theta_data['resultant_force_uls']:.2f}", table_cell_style),
+                            Paragraph(f"{theta_data['resultant_force_sls']:.2f}", table_cell_style)
+                        ]
+                    ]
+                    result_table = Table(table_data, colWidths=[35*mm, 30*mm, 35*mm, 35*mm, 30*mm, 30*mm])
                 else:
-                    table_data = [[Paragraph("Distance from Windward End (m)", table_header_style),
-                                   Paragraph("Wind Pressure (p, kPa)", table_header_style)]]
+                    table_data = [
+                        [
+                            Paragraph("Distance from Windward End (m)", table_header_style),
+                            Paragraph("<b>Ultimate Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
+                            Paragraph("Service Wind Pressure (p, kPa) (SLS)", table_header_style)
+                        ]
+                    ]
                     distances = theta_data['distances']
-                    pressures = theta_data['pressures']
+                    pressures_uls = theta_data['pressures_uls']
+                    pressures_sls = theta_data['pressures_sls']
                     step = max(1, len(distances) // 5)
                     for i in range(0, len(distances), step):
-                        table_data.append([Paragraph(f"{distances[i]:.2f}", table_cell_style),
-                                           Paragraph(f"{pressures[i]:.3f}", table_cell_style)])
-                    result_table = Table(table_data, colWidths=[90*mm, 90*mm])
+                        table_data.append([
+                            Paragraph(f"{distances[i]:.2f}", table_cell_style),
+                            Paragraph(f"{pressures_uls[i]:.3f}", table_cell_style),
+                            Paragraph(f"{pressures_sls[i]:.3f}", table_cell_style)
+                        ])
+                    result_table = Table(table_data, colWidths=[60*mm, 60*mm, 60*mm])
                 result_table.setStyle(table_style)
                 elements.append(result_table)
                 elements.append(Spacer(1, 4*mm))
 
-            elements.append(Paragraph("Pressure Distribution Graph", heading_style))
+            elements.append(Paragraph("Pressure Distribution Graph (ULS)", heading_style))
             graph_filename = data['graph_filename']
             try:
                 graph_image = Image(graph_filename, width=140*mm, height=70*mm)
@@ -509,19 +541,27 @@ def build_elements(inputs, results, project_number, project_name):
             elements.append(Spacer(1, 4*mm))
 
         else:
-            table_data = [[Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
-                           Paragraph("Eccentricity (e, m)", table_header_style),
-                           Paragraph("Wind Pressure (p, kPa)", table_header_style)],
-                          [Paragraph(f"{data['C_shp']:.3f}", table_cell_style),
-                           Paragraph(f"{data['e']:.2f}", table_cell_style),
-                           Paragraph(f"{data['p']:.3f}", table_cell_style)]]
-            result_table = Table(table_data, colWidths=[60*mm, 60*mm, 60*mm])
+            table_data = [
+                [
+                    Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                    Paragraph("Eccentricity (e, m)", table_header_style),
+                    Paragraph("<b>Ultimate Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
+                    Paragraph("Service Wind Pressure (p, kPa) (SLS)", table_header_style)
+                ],
+                [
+                    Paragraph(f"{data['C_shp']:.3f}", table_cell_style),
+                    Paragraph(f"{data['e']:.2f}", table_cell_style),
+                    Paragraph(f"{data['p_uls']:.3f}", table_cell_style),
+                    Paragraph(f"{data['p_sls']:.3f}", table_cell_style)
+                ]
+            ]
+            result_table = Table(table_data, colWidths=[45*mm, 45*mm, 45*mm, 45*mm])
             result_table.setStyle(table_style)
             elements.append(result_table)
             elements.append(Spacer(1, 4*mm))
 
         if structure_type == "Protection Screens" and idx == len(limit_states) - 1:
-            elements.append(Paragraph("Pressure Variation with Height", heading_style))
+            elements.append(Paragraph("Pressure Variation with Height (ULS)", heading_style))
             graph_filename = results['ULS']['height_pressure_graph']
             try:
                 graph_image = Image(graph_filename, width=140*mm, height=70*mm)
@@ -664,12 +704,24 @@ def main():
             'construction_period': construction_period
         }
 
+        # Calculate SLS wind speed separately for service wind pressure
+        V_R_sls, _ = calculator.determine_V_R(
+            region, "SLS", reference_height=reference_height
+        )
+        M_d = calculator.determine_M_d(region)
+        M_c = calculator.determine_M_c(region)
+        M_s = calculator.determine_M_s(region)
+        M_t = calculator.determine_M_t(region)
+        M_z_cat = calculator.determine_M_z_cat(region, terrain_category, reference_height)
+        V_sit_beta_sls = calculator.calculate_site_wind_speed(V_R_sls, M_d, M_c, M_s, M_t, M_z_cat)
+        V_des_theta_sls = calculator.calculate_design_wind_speed(V_sit_beta_sls, "SLS")
+
         limit_states = ["ULS", "SLS"]
         results = {}
         for limit_state in limit_states:
-            # Pass construction_period to determine_V_R
+            # ULS/SLS wind speed for ultimate wind pressure
             V_R, reduction_factor = calculator.determine_V_R(
-                region, limit_state, importance_level, distance_from_coast_km, construction_period
+                region, limit_state, importance_level, distance_from_coast_km, construction_period, reference_height
             )
             M_d = calculator.determine_M_d(region)
             M_c = calculator.determine_M_c(region)
@@ -685,19 +737,29 @@ def main():
                 for theta in thetas:
                     if theta == 0:
                         C_shp, e = calculator.calculate_aerodynamic_shape_factor(structure_type, None, b, c, h, theta, has_return_corner=has_return_corner)
-                        p = calculator.calculate_wind_pressure(V_des_theta, C_shp)
-                        resultant_force = p * b * c
-                        theta_results[theta] = {'C_shp': C_shp, 'e': e, 'p': p, 'resultant_force': resultant_force}
+                        p_uls = calculator.calculate_wind_pressure(V_des_theta, C_shp)
+                        p_sls = calculator.calculate_wind_pressure(V_des_theta_sls, C_shp)
+                        resultant_force_uls = p_uls * b * c
+                        resultant_force_sls = p_sls * b * c
+                        theta_results[theta] = {
+                            'C_shp': C_shp, 'e': e, 'p_uls': p_uls, 'p_sls': p_sls,
+                            'resultant_force_uls': resultant_force_uls, 'resultant_force_sls': resultant_force_sls
+                        }
                     else:
-                        distances, pressures = calculator.calculate_pressure_distribution(b, c, h, V_des_theta, theta, has_return_corner=has_return_corner)
-                        theta_results[theta] = {'distances': distances, 'pressures': pressures, 'max_pressure': max(pressures)}
+                        distances, pressures_uls = calculator.calculate_pressure_distribution(b, c, h, V_des_theta, theta, has_return_corner=has_return_corner)
+                        _, pressures_sls = calculator.calculate_pressure_distribution(b, c, h, V_des_theta_sls, theta, has_return_corner=has_return_corner)
+                        theta_results[theta] = {
+                            'distances': distances, 'pressures_uls': pressures_uls, 'pressures_sls': pressures_sls,
+                            'max_pressure_uls': max(pressures_uls), 'max_pressure_sls': max(pressures_sls)
+                        }
 
+                # Plot ULS pressures only for the graph
                 plt.figure(figsize=(8, 4))
                 distances, pressures = calculator.calculate_pressure_distribution(b, c, h, V_des_theta, 45, has_return_corner)
                 plt.plot(distances, pressures, label="θ = 45°", color="blue")
                 distances, pressures = calculator.calculate_pressure_distribution(b, c, h, V_des_theta, 90, has_return_corner)
                 plt.plot(distances, pressures, label="θ = 90°", color="green")
-                plt.axhline(y=theta_results[0]['p'], color="red", linestyle="--", label="θ = 0° (uniform)")
+                plt.axhline(y=theta_results[0]['p_uls'], color="red", linestyle="--", label="θ = 0° (uniform)")
                 plt.xlabel("Distance from Windward Free End (m)")
                 plt.ylabel("Wind Pressure (kPa)")
                 plt.title(f"Wind Pressure Distribution ({location}, {limit_state})")
@@ -710,25 +772,29 @@ def main():
                 results[limit_state] = {
                     'V_R': V_R, 'V_sit_beta': V_sit_beta, 'V_des_theta': V_des_theta,
                     'results': theta_results, 'graph_filename': graph_filename,
-                    'reduction_factor': reduction_factor  # Store the reduction factor
+                    'reduction_factor': reduction_factor
                 }
             else:
                 C_shp, e = calculator.calculate_aerodynamic_shape_factor(structure_type, user_C_shp=user_C_shp)
-                p = calculator.calculate_wind_pressure(V_des_theta, C_shp)
+                p_uls = calculator.calculate_wind_pressure(V_des_theta, C_shp)
+                p_sls = calculator.calculate_wind_pressure(V_des_theta_sls, C_shp)
                 if structure_type == "Protection Screens":
-                    heights, V_des_values, pressures = calculator.calculate_pressure_vs_height(
+                    heights, V_des_values, pressures_uls = calculator.calculate_pressure_vs_height(
                         region, terrain_category, reference_height, limit_state, importance_level, distance_from_coast_km, C_shp
+                    )
+                    _, _, pressures_sls = calculator.calculate_pressure_vs_height(
+                        region, terrain_category, reference_height, "SLS", importance_level, distance_from_coast_km, C_shp
                     )
                     results[limit_state] = {
                         'V_R': V_R, 'V_sit_beta': V_sit_beta, 'V_des_theta': V_des_theta,
-                        'C_shp': C_shp, 'e': e, 'p': p,
-                        'heights': heights, 'V_des_values': V_des_values, 'pressures': pressures,
-                        'reduction_factor': reduction_factor  # Store the reduction factor
+                        'C_shp': C_shp, 'e': e, 'p_uls': p_uls, 'p_sls': p_sls,
+                        'heights': heights, 'V_des_values': V_des_values, 'pressures_uls': pressures_uls, 'pressures_sls': pressures_sls,
+                        'reduction_factor': reduction_factor
                     }
                     if limit_state == "SLS":
                         plt.figure(figsize=(8, 4))
-                        plt.plot(results['ULS']['heights'], results['ULS']['pressures'], label="ULS", color="blue")
-                        plt.plot(results['SLS']['heights'], results['SLS']['pressures'], label="SLS", color="green")
+                        plt.plot(results['ULS']['heights'], results['ULS']['pressures_uls'], label="ULS", color="blue")
+                        plt.plot(results['SLS']['heights'], results['SLS']['pressures_uls'], label="SLS (ULS V_R)", color="green")
                         plt.xlabel("Height (m)")
                         plt.ylabel("Wind Pressure (kPa)")
                         plt.title(f"Wind Pressure vs. Height ({location})")
@@ -742,8 +808,8 @@ def main():
                 else:
                     results[limit_state] = {
                         'V_R': V_R, 'V_sit_beta': V_sit_beta, 'V_des_theta': V_des_theta,
-                        'C_shp': C_shp, 'e': e, 'p': p,
-                        'reduction_factor': reduction_factor  # Store the reduction factor
+                        'C_shp': C_shp, 'e': e, 'p_uls': p_uls, 'p_sls': p_sls,
+                        'reduction_factor': reduction_factor
                     }
 
         pdf_data = generate_pdf_report(inputs, results, project_number, project_name)
