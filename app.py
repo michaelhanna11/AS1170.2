@@ -558,15 +558,15 @@ def build_elements(inputs, results, project_number, project_name):
                 elements.append(result_table)
                 elements.append(Spacer(1, 4*mm))
 
-            if limit_state == "ULS":  # Only show graph for ULS
-                elements.append(Paragraph("Pressure Distribution Graph (ULS)", heading_style))
-                graph_filename = data['graph_filename']
-                try:
-                    graph_image = Image(graph_filename, width=140*mm, height=70*mm)
-                    elements.append(graph_image)
-                except Exception as e:
-                    elements.append(Paragraph(f"[Graph Placeholder - Error: {e}]", normal_style))
-                elements.append(Spacer(1, 4*mm))
+            # Show graph for both ULS and SLS
+            elements.append(Paragraph(f"Pressure Distribution Graph ({limit_state})", heading_style))
+            graph_filename = data['graph_filename']
+            try:
+                graph_image = Image(graph_filename, width=140*mm, height=70*mm)
+                elements.append(graph_image)
+            except Exception as e:
+                elements.append(Paragraph(f"[Graph Placeholder - Error: {e}]", normal_style))
+            elements.append(Spacer(1, 4*mm))
 
         else:
             if limit_state == "ULS":
@@ -772,6 +772,9 @@ def main():
             V_sit_beta = calculator.calculate_site_wind_speed(V_R, M_d, M_c, M_s, M_t, M_z_cat)
             V_des_theta = calculator.calculate_design_wind_speed(V_sit_beta, limit_state)
 
+            # Use the appropriate design wind speed for the limit state
+            V_des_to_use = V_des_theta if limit_state == "ULS" else V_des_theta_sls
+
             if structure_type == "Free Standing Wall":
                 thetas = [0, 45, 90]
                 theta_results = {}
@@ -794,13 +797,13 @@ def main():
                             'max_pressure_uls': max(pressures_uls), 'max_pressure_sls': max(pressures_sls)
                         }
 
-                # Plot ULS pressures only for the graph
+                # Generate pressure distribution graph for the current limit state
                 plt.figure(figsize=(8, 4))
-                distances, pressures = calculator.calculate_pressure_distribution(b, c, h, V_des_theta, 45, has_return_corner)
-                plt.plot(distances, pressures, label="θ = 45°", color="blue")
-                distances, pressures = calculator.calculate_pressure_distribution(b, c, h, V_des_theta, 90, has_return_corner)
-                plt.plot(distances, pressures, label="θ = 90°", color="green")
-                plt.axhline(y=theta_results[0]['p_uls'], color="red", linestyle="--", label="θ = 0° (uniform)")
+                distances, pressures_45 = calculator.calculate_pressure_distribution(b, c, h, V_des_to_use, 45, has_return_corner)
+                plt.plot(distances, pressures_45, label="θ = 45°", color="blue")
+                distances, pressures_90 = calculator.calculate_pressure_distribution(b, c, h, V_des_to_use, 90, has_return_corner)
+                plt.plot(distances, pressures_90, label="θ = 90°", color="green")
+                plt.axhline(y=theta_results[0]['p_uls' if limit_state == "ULS" else 'p_sls'], color="red", linestyle="--", label="θ = 0° (uniform)")
                 plt.xlabel("Distance from Windward Free End (m)")
                 plt.ylabel("Wind Pressure (kPa)")
                 plt.title(f"Wind Pressure Distribution ({location}, {limit_state})")
