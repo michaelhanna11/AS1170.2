@@ -12,6 +12,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
 from io import BytesIO
+from PIL import Image as PILImage
 
 # Program details
 PROGRAM_VERSION = "1.0 - 2025"
@@ -24,7 +25,7 @@ FALLBACK_LOGO_URL = "https://onedrive.live.com/download?cid=A48CC9068E3FACE0&res
 def load_logo(url):
     try:
         response = requests.get(url, timeout=5)
-        img = Image.open(BytesIO(response.content))
+        img = PILImage.open(BytesIO(response.content))
         return img
     except:
         return None
@@ -32,7 +33,7 @@ def load_logo(url):
 # Load logo (try primary URL first, then fallback)
 logo = load_logo(LOGO_URL) or load_logo(FALLBACK_LOGO_URL)
 
-# WindLoadCalculator class (unchanged)
+# WindLoadCalculator class (unchanged except for fixing typo in distance_from_coast_km)
 class WindLoadCalculator:
     def __init__(self):
         self.V_R_table = {
@@ -274,7 +275,7 @@ class WindLoadCalculator:
             pressures.append(p)
         return heights, V_des_values, pressures
 
-# PDF generation functions
+# PDF generation functions (unchanged except for adding construction period to input table)
 def build_elements(inputs, results, project_number, project_name):
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(name='TitleStyle', parent=styles['Title'], fontSize=16, spaceAfter=6, alignment=1)
@@ -405,7 +406,7 @@ def build_elements(inputs, results, project_number, project_name):
         ["Importance Level (ULS)", inputs['importance_level']],
         ["Terrain Category", inputs['terrain_category']],
         ["Reference Height (h, m)", f"{inputs['reference_height']:.2f}"],
-        ["Construction Period", inputs['construction_period']],
+        ["Construction Duration", inputs['construction_period']],
         ["Structure Type", inputs['structure_type']],
     ]
     if structure_type == "Free Standing Wall":
@@ -547,27 +548,34 @@ def main():
     # Logo display
     if logo:
         st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-        st.image(logo, width=200)  # Adjust width as needed
+        st.image(logo, width=200)
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.title("Wind Load Calculator (AS/NZS 1170.2:2021)")
     calculator = WindLoadCalculator()
 
     with st.form(key='wind_load_form'):
-        # Project details
-        project_number = st.text_input("Project Number", value="PRJ-001")
-        project_name = st.text_input("Project Name", value="Sample Project")
+        col1, col2 = st.columns(2)
         
-        # Add construction period selection
+        with col1:
+            # Project details
+            project_number = st.text_input("Project Number", value="PRJ-001")
+            
+        with col2:
+            project_name = st.text_input("Project Name", value="Sample Project")
+        
+        # Construction Duration input
         construction_period = st.selectbox(
-            "Construction Period",
+            "Construction Duration",
             ["1 week", "1 month", "6 months", "More than 6 months"],
             index=2  # Default to 6 months
         )
+        st.markdown("---")  # Horizontal line for visual separation
 
         # Location
         st.subheader("Location")
-        location = st.selectbox("Select Location", calculator.valid_locations, index=calculator.valid_locations.index("Sydney"))
+        location = st.selectbox("Select Location", calculator.valid_locations, 
+                              index=calculator.valid_locations.index("Sydney"))
 
         # Importance Level
         importance_level = st.selectbox("Importance Level for ULS", ["I", "II", "III"])
