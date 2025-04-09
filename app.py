@@ -489,78 +489,119 @@ def build_elements(inputs, results, project_number, project_name):
                 theta_data = data['results'][theta]
                 elements.append(Paragraph(f"Wind Direction: θ = {theta}°", normal_style))
                 if theta == 0:
-                    table_data = [
-                        [
-                            Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
-                            Paragraph("Eccentricity (e, m)", table_header_style),
-                            Paragraph("<b>Ultimate Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
-                            Paragraph("Service Wind Pressure (p, kPa) (SLS)", table_header_style),
-                            Paragraph("Resultant Force (kN) (ULS)", table_header_style),
-                            Paragraph("Resultant Force (kN) (SLS)", table_header_style)
-                        ],
-                        [
-                            Paragraph(f"{theta_data['C_shp']:.3f}", table_cell_style),
-                            Paragraph(f"{theta_data['e']:.2f}", table_cell_style),
-                            Paragraph(f"{theta_data['p_uls']:.3f}", table_cell_style),
-                            Paragraph(f"{theta_data['p_sls']:.3f}", table_cell_style),
-                            Paragraph(f"{theta_data['resultant_force_uls']:.2f}", table_cell_style),
-                            Paragraph(f"{theta_data['resultant_force_sls']:.2f}", table_cell_style)
+                    if limit_state == "ULS":
+                        table_data = [
+                            [
+                                Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                                Paragraph("Eccentricity (e, m)", table_header_style),
+                                Paragraph("<b>Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
+                                Paragraph("Resultant Force (kN) (ULS)", table_header_style),
+                            ],
+                            [
+                                Paragraph(f"{theta_data['C_shp']:.3f}", table_cell_style),
+                                Paragraph(f"{theta_data['e']:.2f}", table_cell_style),
+                                Paragraph(f"{theta_data['p_uls']:.3f}", table_cell_style),
+                                Paragraph(f"{theta_data['resultant_force_uls']:.2f}", table_cell_style),
+                            ]
                         ]
-                    ]
-                    result_table = Table(table_data, colWidths=[35*mm, 30*mm, 35*mm, 35*mm, 30*mm, 30*mm])
+                        result_table = Table(table_data, colWidths=[45*mm, 35*mm, 35*mm, 35*mm])
+                    else:  # SLS
+                        table_data = [
+                            [
+                                Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                                Paragraph("Eccentricity (e, m)", table_header_style),
+                                Paragraph("Wind Pressure (p, kPa) (SLS)", table_header_style),
+                                Paragraph("Resultant Force (kN) (SLS)", table_header_style),
+                            ],
+                            [
+                                Paragraph(f"{theta_data['C_shp']:.3f}", table_cell_style),
+                                Paragraph(f"{theta_data['e']:.2f}", table_cell_style),
+                                Paragraph(f"{theta_data['p_sls']:.3f}", table_cell_style),
+                                Paragraph(f"{theta_data['resultant_force_sls']:.2f}", table_cell_style),
+                            ]
+                        ]
+                        result_table = Table(table_data, colWidths=[45*mm, 35*mm, 35*mm, 35*mm])
                 else:
-                    table_data = [
-                        [
-                            Paragraph("Distance from Windward End (m)", table_header_style),
-                            Paragraph("<b>Ultimate Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
-                            Paragraph("Service Wind Pressure (p, kPa) (SLS)", table_header_style)
+                    if limit_state == "ULS":
+                        table_data = [
+                            [
+                                Paragraph("Distance from Windward End (m)", table_header_style),
+                                Paragraph("<b>Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
+                            ]
                         ]
-                    ]
-                    distances = theta_data['distances']
-                    pressures_uls = theta_data['pressures_uls']
-                    pressures_sls = theta_data['pressures_sls']
-                    step = max(1, len(distances) // 5)
-                    for i in range(0, len(distances), step):
-                        table_data.append([
-                            Paragraph(f"{distances[i]:.2f}", table_cell_style),
-                            Paragraph(f"{pressures_uls[i]:.3f}", table_cell_style),
-                            Paragraph(f"{pressures_sls[i]:.3f}", table_cell_style)
-                        ])
-                    result_table = Table(table_data, colWidths=[60*mm, 60*mm, 60*mm])
+                        distances = theta_data['distances']
+                        pressures = theta_data['pressures_uls']
+                        step = max(1, len(distances) // 5)
+                        for i in range(0, len(distances), step):
+                            table_data.append([
+                                Paragraph(f"{distances[i]:.2f}", table_cell_style),
+                                Paragraph(f"{pressures[i]:.3f}", table_cell_style),
+                            ])
+                        result_table = Table(table_data, colWidths=[90*mm, 90*mm])
+                    else:  # SLS
+                        table_data = [
+                            [
+                                Paragraph("Distance from Windward End (m)", table_header_style),
+                                Paragraph("Wind Pressure (p, kPa) (SLS)", table_header_style),
+                            ]
+                        ]
+                        distances = theta_data['distances']
+                        pressures = theta_data['pressures_sls']
+                        step = max(1, len(distances) // 5)
+                        for i in range(0, len(distances), step):
+                            table_data.append([
+                                Paragraph(f"{distances[i]:.2f}", table_cell_style),
+                                Paragraph(f"{pressures[i]:.3f}", table_cell_style),
+                            ])
+                        result_table = Table(table_data, colWidths=[90*mm, 90*mm])
                 result_table.setStyle(table_style)
                 elements.append(result_table)
                 elements.append(Spacer(1, 4*mm))
 
-            elements.append(Paragraph("Pressure Distribution Graph (ULS)", heading_style))
-            graph_filename = data['graph_filename']
-            try:
-                graph_image = Image(graph_filename, width=140*mm, height=70*mm)
-                elements.append(graph_image)
-            except Exception as e:
-                elements.append(Paragraph(f"[Graph Placeholder - Error: {e}]", normal_style))
-            elements.append(Spacer(1, 4*mm))
+            if limit_state == "ULS":  # Only show graph for ULS
+                elements.append(Paragraph("Pressure Distribution Graph (ULS)", heading_style))
+                graph_filename = data['graph_filename']
+                try:
+                    graph_image = Image(graph_filename, width=140*mm, height=70*mm)
+                    elements.append(graph_image)
+                except Exception as e:
+                    elements.append(Paragraph(f"[Graph Placeholder - Error: {e}]", normal_style))
+                elements.append(Spacer(1, 4*mm))
 
         else:
-            table_data = [
-                [
-                    Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
-                    Paragraph("Eccentricity (e, m)", table_header_style),
-                    Paragraph("<b>Ultimate Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
-                    Paragraph("Service Wind Pressure (p, kPa) (SLS)", table_header_style)
-                ],
-                [
-                    Paragraph(f"{data['C_shp']:.3f}", table_cell_style),
-                    Paragraph(f"{data['e']:.2f}", table_cell_style),
-                    Paragraph(f"{data['p_uls']:.3f}", table_cell_style),
-                    Paragraph(f"{data['p_sls']:.3f}", table_cell_style)
+            if limit_state == "ULS":
+                table_data = [
+                    [
+                        Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                        Paragraph("Eccentricity (e, m)", table_header_style),
+                        Paragraph("<b>Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
+                    ],
+                    [
+                        Paragraph(f"{data['C_shp']:.3f}", table_cell_style),
+                        Paragraph(f"{data['e']:.2f}", table_cell_style),
+                        Paragraph(f"{data['p_uls']:.3f}", table_cell_style),
+                    ]
                 ]
-            ]
-            result_table = Table(table_data, colWidths=[45*mm, 45*mm, 45*mm, 45*mm])
+                result_table = Table(table_data, colWidths=[60*mm, 60*mm, 60*mm])
+            else:  # SLS
+                table_data = [
+                    [
+                        Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                        Paragraph("Eccentricity (e, m)", table_header_style),
+                        Paragraph("Wind Pressure (p, kPa) (SLS)", table_header_style),
+                    ],
+                    [
+                        Paragraph(f"{data['C_shp']:.3f}", table_cell_style),
+                        Paragraph(f"{data['e']:.2f}", table_cell_style),
+                        Paragraph(f"{data['p_sls']:.3f}", table_cell_style),
+                    ]
+                ]
+                result_table = Table(table_data, colWidths=[60*mm, 60*mm, 60*mm])
             result_table.setStyle(table_style)
             elements.append(result_table)
             elements.append(Spacer(1, 4*mm))
 
-        if structure_type == "Protection Screens" and idx == len(limit_states) - 1:
+        if structure_type == "Protection Screens" and idx == len(limit_states) - 1 and limit_state == "ULS":
             elements.append(Paragraph("Pressure Variation with Height (ULS)", heading_style))
             graph_filename = results['ULS']['height_pressure_graph']
             try:
