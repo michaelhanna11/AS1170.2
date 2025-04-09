@@ -20,6 +20,19 @@ COMPANY_ADDRESS = "   "  # Placeholder; update with actual address if needed
 LOGO_URL = "https://drive.google.com/uc?export=download&id=1VebdT2loVGX57noP9t2GgQhwCNn8AA3h"
 FALLBACK_LOGO_URL = "https://onedrive.live.com/download?cid=A48CC9068E3FACE0&resid=A48CC9068E3FACE0%21s252b6fb7fcd04f53968b2a09114d33ed"
 
+def load_logo(url):
+    try:
+        response = requests.get(url, timeout=5)
+        img = Image.open(BytesIO(response.content))
+        return img
+    except:
+        return None
+
+# Load logo (try primary URL first, then fallback)
+logo = load_logo(LOGO_URL) or load_logo(FALLBACK_LOGO_URL)
+
+
+
 # WindLoadCalculator class (unchanged)
 class WindLoadCalculator:
     def __init__(self):
@@ -530,6 +543,14 @@ def generate_pdf_report(inputs, results, project_number, project_name):
 def main():
     # Set page configuration with a title for the browser tab
     st.set_page_config(page_title="Wind Load Calculator - AS/NZS 1170.2:2021")
+
+    # Logo display
+if logo:
+    st.markdown('<div class="logo-container">', unsafe_allow_html=True)
+    st.image(logo, width=200)  # Adjust width as needed
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
     
     st.title("Wind Load Calculator (AS/NZS 1170.2:2021)")
     calculator = WindLoadCalculator()
