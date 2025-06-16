@@ -18,7 +18,7 @@ from PIL import Image as PILImage
 PROGRAM_VERSION = "1.0 - 2025"
 PROGRAM = "Wind Load Calculator to AS/NZS 1170.2:2021"
 COMPANY_NAME = "tekhne Consulting Engineers"
-COMPANY_ADDRESS = "   "  # Placeholder; update with actual address if needed
+COMPANY_ADDRESS = "    "  # Placeholder; update with actual address if needed
 LOGO_URL = "https://drive.google.com/uc?export=download&id=1VebdT2loVGX57noP9t2GgQhwCNn8AA3h"
 FALLBACK_LOGO_URL = "https://onedrive.live.com/download?cid=A48CC9068E3FACE0&resid=A48CC9068E3FACE0%21s252b6fb7fcd04f53968b2a09114d33ed"
 
@@ -290,21 +290,38 @@ class WindLoadCalculator:
 
     def calculate_pressure_vs_height(self, region, terrain_category, reference_height, limit_state, importance_level, distance_from_coast_km, C_shp):
         height_step = 5.0
+        # Ensure heights go up to and include reference_height
         heights = np.arange(0, reference_height + height_step, height_step)
-        if heights[-1] > reference_height:
+        # If the last step goes beyond reference_height, remove it and add reference_height precisely
+        if heights[-1] > reference_height and reference_height not in heights:
             heights = heights[:-1]
-        heights = np.append(heights, reference_height)
-        heights = np.sort(heights)
+            heights = np.append(heights, reference_height)
+        elif reference_height not in heights: # If reference_height is between steps, add it
+            heights = np.append(heights, reference_height)
+        
+        heights = np.unique(np.sort(heights)) # Ensure unique and sorted heights
+
         V_des_values = []
         pressures = []
-        V_R = self.determine_V_R(region, limit_state, importance_level, distance_from_coast_km, reference_height=reference_height)[0]  # Only need V_R
-        M_d = self.determine_M_d(region)
-        M_c = self.determine_M_c(region)
-        M_s = self.determine_M_s(region)
-        M_t = self.determine_M_t(region)
-        for h in heights:
-            M_z_cat = self.determine_M_z_cat(region, terrain_category, h)
-            V_sit_beta = self.calculate_site_wind_speed(V_R, M_d, M_c, M_s, M_t, M_z_cat)
+        
+        # Recalculate V_R for each height step if it's SLS (due to reference_height in V_R calculation for SLS)
+        # For ULS, V_R is constant based on importance_level and region/distance_from_coast_km
+        V_R_base, _ = self.determine_V_R(region, limit_state, importance_level, distance_from_coast_km, reference_height=reference_height)
+        
+        for h_current in heights:
+            # For SLS, V_R is dependent on the current height (h_current)
+            if limit_state == "SLS":
+                V_R_h_current, _ = self.determine_V_R(region, limit_state, reference_height=h_current)
+            else: # For ULS, V_R is constant
+                V_R_h_current = V_R_base
+
+            M_d = self.determine_M_d(region)
+            M_c = self.determine_M_c(region)
+            M_s = self.determine_M_s(region)
+            M_t = self.determine_M_t(region)
+            M_z_cat = self.determine_M_z_cat(region, terrain_category, h_current)
+            
+            V_sit_beta = self.calculate_site_wind_speed(V_R_h_current, M_d, M_c, M_s, M_t, M_z_cat)
             V_des = self.calculate_design_wind_speed(V_sit_beta, limit_state)
             p = self.calculate_wind_pressure(V_des, C_shp)
             V_des_values.append(V_des)
@@ -372,8 +389,8 @@ def build_elements(inputs, results, project_number, project_name):
 
     company_text = f"<b>{COMPANY_NAME}</b><br/>{COMPANY_ADDRESS}"
     company_paragraph = Paragraph(company_text, normal_style)
-    logo = Image(logo_file, width=50*mm, height=20*mm) if logo_file else Paragraph("[Logo Placeholder]", normal_style)
-    header_data = [[logo, company_paragraph]]
+    logo_img_obj = Image(logo_file, width=50*mm, height=20*mm) if logo_file else Paragraph("[Logo Placeholder]", normal_style)
+    header_data = [[logo_img_obj, company_paragraph]]
     header_table = Table(header_data, colWidths=[60*mm, 120*mm])
     header_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('ALIGN', (1, 0), (1, 0), 'CENTER')]))
     elements.append(header_table)
@@ -558,7 +575,7 @@ def build_elements(inputs, results, project_number, project_name):
                 elements.append(result_table)
                 elements.append(Spacer(1, 4*mm))
 
-            # Show graph for both ULS and SLS
+            # Show graph for both ULS and SLS for Free Standing Wall
             elements.append(Paragraph(f"Pressure Distribution Graph ({limit_state})", heading_style))
             graph_filename = data['graph_filename']
             try:
@@ -568,8 +585,8 @@ def build_elements(inputs, results, project_number, project_name):
                 elements.append(Paragraph(f"[Graph Placeholder - Error: {e}]", normal_style))
             elements.append(Spacer(1, 4*mm))
 
-        else:
-            if limit_state == "ULS":
+        else: # For Circular Tank, Attached Canopy, Protection Screens
+            if limit_state == "ULS": # Only show the overall C_shp and pressure once for ULS
                 table_data = [
                     [
                         Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
@@ -583,7 +600,7 @@ def build_elements(inputs, results, project_number, project_name):
                     ]
                 ]
                 result_table = Table(table_data, colWidths=[60*mm, 60*mm, 60*mm])
-            else:  # SLS
+            else: # SLS
                 table_data = [
                     [
                         Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
@@ -600,22 +617,32 @@ def build_elements(inputs, results, project_number, project_name):
             result_table.setStyle(table_style)
             elements.append(result_table)
             elements.append(Spacer(1, 4*mm))
+            
+            # Show Pressure Variation with Height graph ONLY for Protection Screens AND ULS
+            if structure_type == "Protection Screens" and limit_state == "ULS":
+                elements.append(Paragraph("Pressure Variation with Height (ULS)", heading_style))
+                graph_filename = results['ULS']['height_pressure_graph']
+                try:
+                    graph_image = Image(graph_filename, width=140*mm, height=70*mm)
+                    elements.append(graph_image)
+                except Exception as e:
+                    elements.append(Paragraph(f"[Graph Placeholder - Error: {e}]", normal_style))
+                elements.append(Spacer(1, 4*mm))
 
-        if structure_type == "Protection Screens" and idx == len(limit_states) - 1 and limit_state == "ULS":
-            elements.append(Paragraph("Pressure Variation with Height (ULS)", heading_style))
-            graph_filename = results['ULS']['height_pressure_graph']
-            try:
-                graph_image = Image(graph_filename, width=140*mm, height=70*mm)
-                elements.append(graph_image)
-            except Exception as e:
-                elements.append(Paragraph(f"[Graph Placeholder - Error: {e}]", normal_style))
-            elements.append(Spacer(1, 4*mm))
 
+        # Add page break or spacer between limit states for Free Standing Walls or if it's the end of other types
         if idx < len(limit_states) - 1:
-            if structure_type != "Protection Screens":
+            # If Free Standing Wall, add page break between ULS and SLS sections
+            if structure_type == "Free Standing Wall":
                 elements.append(PageBreak())
+            # For Protection Screens, if we just showed the ULS graph, add a spacer before SLS.
+            # No page break needed between ULS and SLS for other types.
+            elif structure_type == "Protection Screens" and limit_state == "ULS":
+                 elements.append(Spacer(1, 6*mm))
+            # For other types, just a spacer between ULS and SLS
             else:
                 elements.append(Spacer(1, 6*mm))
+
 
     return elements
 
@@ -689,7 +716,7 @@ def main():
         # Location
         st.subheader("Location")
         location = st.selectbox("Select Location", calculator.valid_locations, 
-                              index=calculator.valid_locations.index("Sydney"))
+                                 index=calculator.valid_locations.index("Sydney"))
 
         # Importance Level
         importance_level = st.selectbox("Importance Level for ULS", ["I", "II", "III"])
@@ -753,12 +780,20 @@ def main():
         M_c = calculator.determine_M_c(region)
         M_s = calculator.determine_M_s(region)
         M_t = calculator.determine_M_t(region)
-        M_z_cat = calculator.determine_M_z_cat(region, terrain_category, reference_height)
-        V_sit_beta_sls = calculator.calculate_site_wind_speed(V_R_sls, M_d, M_c, M_s, M_t, M_z_cat)
+        M_z_cat_ref_height = calculator.determine_M_z_cat(region, terrain_category, reference_height)
+        V_sit_beta_sls = calculator.calculate_site_wind_speed(V_R_sls, M_d, M_c, M_s, M_t, M_z_cat_ref_height)
         V_des_theta_sls = calculator.calculate_design_wind_speed(V_sit_beta_sls, "SLS")
 
         limit_states = ["ULS", "SLS"]
         results = {}
+        
+        # Calculate C_shp and eccentricity once for non-Free Standing Wall types
+        C_shp_for_other_types, e_for_other_types = None, None
+        if structure_type != "Free Standing Wall":
+            C_shp_for_other_types, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(
+                structure_type, user_C_shp=user_C_shp
+            )
+
         for limit_state in limit_states:
             # ULS/SLS wind speed for ultimate wind pressure
             V_R, reduction_factor = calculator.determine_V_R(
@@ -818,43 +853,52 @@ def main():
                     'results': theta_results, 'graph_filename': graph_filename,
                     'reduction_factor': reduction_factor
                 }
-            else:
-                C_shp, e = calculator.calculate_aerodynamic_shape_factor(structure_type, user_C_shp=user_C_shp)
+            else: # For Circular Tank, Attached Canopy, Protection Screens
+                C_shp = C_shp_for_other_types
+                e = e_for_other_types
                 p_uls = calculator.calculate_wind_pressure(V_des_theta, C_shp)
                 p_sls = calculator.calculate_wind_pressure(V_des_theta_sls, C_shp)
+                
+                results[limit_state] = {
+                    'V_R': V_R, 'V_sit_beta': V_sit_beta, 'V_des_theta': V_des_theta,
+                    'C_shp': C_shp, 'e': e, 'p_uls': p_uls, 'p_sls': p_sls,
+                    'reduction_factor': reduction_factor
+                }
+
+                # Generate pressure vs height graph only for Protection Screens (once for ULS for both plots)
                 if structure_type == "Protection Screens":
-                    heights, V_des_values, pressures_uls = calculator.calculate_pressure_vs_height(
-                        region, terrain_category, reference_height, limit_state, importance_level, distance_from_coast_km, C_shp
+                    heights, V_des_values_uls, pressures_uls_height = calculator.calculate_pressure_vs_height(
+                        region, terrain_category, reference_height, "ULS", importance_level, distance_from_coast_km, C_shp
                     )
-                    _, _, pressures_sls = calculator.calculate_pressure_vs_height(
+                    _, V_des_values_sls, pressures_sls_height = calculator.calculate_pressure_vs_height(
                         region, terrain_category, reference_height, "SLS", importance_level, distance_from_coast_km, C_shp
                     )
-                    results[limit_state] = {
-                        'V_R': V_R, 'V_sit_beta': V_sit_beta, 'V_des_theta': V_des_theta,
-                        'C_shp': C_shp, 'e': e, 'p_uls': p_uls, 'p_sls': p_sls,
-                        'heights': heights, 'V_des_values': V_des_values, 'pressures_uls': pressures_uls, 'pressures_sls': pressures_sls,
-                        'reduction_factor': reduction_factor
-                    }
-                    if limit_state == "SLS":
+                    
+                    # Store height data and pressures in results for both ULS and SLS for the PDF
+                    results['ULS']['heights'] = heights
+                    results['ULS']['V_des_values_height_plot'] = V_des_values_uls
+                    results['ULS']['pressures_uls_height_plot'] = pressures_uls_height
+                    
+                    results['SLS']['heights'] = heights
+                    results['SLS']['V_des_values_height_plot'] = V_des_values_sls
+                    results['SLS']['pressures_sls_height_plot'] = pressures_sls_height
+
+                    # Plotting is done once, typically after ULS calculations are done for Protection Screens
+                    if limit_state == "ULS": # Generate the plot only once for ULS
                         plt.figure(figsize=(8, 4))
-                        plt.plot(results['ULS']['heights'], results['ULS']['pressures_uls'], label="ULS", color="blue")
-                        plt.plot(results['SLS']['heights'], results['SLS']['pressures_uls'], label="SLS (ULS V_R)", color="green")
+                        plt.plot(heights, pressures_uls_height, label="ULS", color="blue")
+                        plt.plot(heights, pressures_sls_height, label="SLS", color="green") # Use actual SLS pressures
                         plt.xlabel("Height (m)")
                         plt.ylabel("Wind Pressure (kPa)")
-                        plt.title(f"Wind Pressure vs. Height ({location})")
+                        plt.title(f"Wind Pressure vs. Height ({location}, Protection Screens)")
                         plt.legend()
                         plt.grid(True)
                         graph_filename = "height_pressure_graph.png"
                         plt.savefig(graph_filename, bbox_inches='tight', dpi=150)
                         plt.close()
                         results['ULS']['height_pressure_graph'] = graph_filename
-                        results['SLS']['height_pressure_graph'] = graph_filename
-                else:
-                    results[limit_state] = {
-                        'V_R': V_R, 'V_sit_beta': V_sit_beta, 'V_des_theta': V_des_theta,
-                        'C_shp': C_shp, 'e': e, 'p_uls': p_uls, 'p_sls': p_sls,
-                        'reduction_factor': reduction_factor
-                    }
+                        results['SLS']['height_pressure_graph'] = graph_filename # Both ULS and SLS can reference the same graph
+
 
         pdf_data = generate_pdf_report(inputs, results, project_number, project_name)
         if pdf_data:
@@ -865,6 +909,7 @@ def main():
                 file_name=f"Wind_Load_Report_{project_number}.pdf",
                 mime="application/pdf"
             )
+            # Display plots in Streamlit UI
             if structure_type == "Free Standing Wall":
                 for limit_state in limit_states:
                     st.image(f"pressure_distribution_{limit_state.lower()}.png", caption=f"Pressure Distribution ({limit_state})")
