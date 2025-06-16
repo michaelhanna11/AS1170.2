@@ -586,7 +586,8 @@ def build_elements(inputs, results, project_number, project_name):
             elements.append(Spacer(1, 4*mm))
 
         else: # For Circular Tank, Attached Canopy, Protection Screens
-            if limit_state == "ULS": # Only show the overall C_shp and pressure once for ULS
+            # Display overall C_shp and pressure for ULS and SLS
+            if limit_state == "ULS":
                 table_data = [
                     [
                         Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
@@ -742,8 +743,9 @@ def main():
         structure_type = structure_choice
 
         # Structure-specific inputs
-        b = c = user_C_shp = None
+        b = c = user_C_shp = None # Initialize variables at None
         has_return_corner = False
+
         if structure_type == "Free Standing Wall":
             b = st.number_input("Width of the Wall (b, m)", min_value=0.1, value=10.0, step=0.1)
             c = st.number_input("Height of the Wall (c, m)", min_value=0.1, max_value=reference_height, value=min(3.0, reference_height), step=0.1)
@@ -752,6 +754,7 @@ def main():
             has_return_corner = st.checkbox(f"Return Corner Extends More Than 1c ({one_c:.2f} m)")
         elif structure_type == "Protection Screens":
             user_C_shp = st.number_input("Aerodynamic Shape Factor (C_shp)", min_value=0.1, value=1.0, step=0.01)
+        # Note: 'b' and 'c' remain None for other structure types, which is desired.
 
         submit_button = st.form_submit_button(label="Calculate and Generate Report")
 
@@ -772,8 +775,8 @@ def main():
             'construction_period': construction_period
         }
 
-        # Calculate SLS wind speed separately for service wind pressure
-        V_R_sls, _ = calculator.determine_V_R(
+        # Calculate SLS wind speed separately for service wind pressure (at reference height)
+        V_R_sls_ref_height, _ = calculator.determine_V_R(
             region, "SLS", reference_height=reference_height
         )
         M_d = calculator.determine_M_d(region)
@@ -781,8 +784,9 @@ def main():
         M_s = calculator.determine_M_s(region)
         M_t = calculator.determine_M_t(region)
         M_z_cat_ref_height = calculator.determine_M_z_cat(region, terrain_category, reference_height)
-        V_sit_beta_sls = calculator.calculate_site_wind_speed(V_R_sls, M_d, M_c, M_s, M_t, M_z_cat_ref_height)
-        V_des_theta_sls = calculator.calculate_design_wind_speed(V_sit_beta_sls, "SLS")
+        V_sit_beta_sls_ref_height = calculator.calculate_site_wind_speed(V_R_sls_ref_height, M_d, M_c, M_s, M_t, M_z_cat_ref_height)
+        V_des_theta_sls_ref_height = calculator.calculate_design_wind_speed(V_sit_beta_sls_ref_height, "SLS")
+
 
         limit_states = ["ULS", "SLS"]
         results = {}
@@ -807,8 +811,8 @@ def main():
             V_sit_beta = calculator.calculate_site_wind_speed(V_R, M_d, M_c, M_s, M_t, M_z_cat)
             V_des_theta = calculator.calculate_design_wind_speed(V_sit_beta, limit_state)
 
-            # Use the appropriate design wind speed for the limit state
-            V_des_to_use = V_des_theta if limit_state == "ULS" else V_des_theta_sls
+            # Use the appropriate design wind speed for the limit state at reference_height
+            V_des_to_use_at_ref_height = V_des_theta if limit_state == "ULS" else V_des_theta_sls_ref_height
 
             if structure_type == "Free Standing Wall":
                 thetas = [0, 45, 90]
@@ -816,8 +820,8 @@ def main():
                 for theta in thetas:
                     if theta == 0:
                         C_shp, e = calculator.calculate_aerodynamic_shape_factor(structure_type, None, b, c, h, theta, has_return_corner=has_return_corner)
-                        p_uls = calculator.calculate_wind_pressure(V_des_theta, C_shp)
-                        p_sls = calculator.calculate_wind_pressure(V_des_theta_sls, C_shp)
+                        p_uls = calculator.calculate_wind_pressure(V_des_theta, C_shp) # V_des_theta for ULS
+                        p_sls = calculator.calculate_wind_pressure(V_des_theta_sls_ref_height, C_shp) # V_des_theta_sls_ref_height for SLS
                         resultant_force_uls = p_uls * b * c
                         resultant_force_sls = p_sls * b * c
                         theta_results[theta] = {
@@ -826,7 +830,7 @@ def main():
                         }
                     else:
                         distances, pressures_uls = calculator.calculate_pressure_distribution(b, c, h, V_des_theta, theta, has_return_corner=has_return_corner)
-                        _, pressures_sls = calculator.calculate_pressure_distribution(b, c, h, V_des_theta_sls, theta, has_return_corner=has_return_corner)
+                        _, pressures_sls = calculator.calculate_pressure_distribution(b, c, h, V_des_theta_sls_ref_height, theta, has_return_corner=has_return_corner)
                         theta_results[theta] = {
                             'distances': distances, 'pressures_uls': pressures_uls, 'pressures_sls': pressures_sls,
                             'max_pressure_uls': max(pressures_uls), 'max_pressure_sls': max(pressures_sls)
@@ -834,9 +838,9 @@ def main():
 
                 # Generate pressure distribution graph for the current limit state
                 plt.figure(figsize=(8, 4))
-                distances, pressures_45 = calculator.calculate_pressure_distribution(b, c, h, V_des_to_use, 45, has_return_corner)
+                distances, pressures_45 = calculator.calculate_pressure_distribution(b, c, h, V_des_to_use_at_ref_height, 45, has_return_corner)
                 plt.plot(distances, pressures_45, label="θ = 45°", color="blue")
-                distances, pressures_90 = calculator.calculate_pressure_distribution(b, c, h, V_des_to_use, 90, has_return_corner)
+                distances, pressures_90 = calculator.calculate_pressure_distribution(b, c, h, V_des_to_use_at_ref_height, 90, has_return_corner)
                 plt.plot(distances, pressures_90, label="θ = 90°", color="green")
                 plt.axhline(y=theta_results[0]['p_uls' if limit_state == "ULS" else 'p_sls'], color="red", linestyle="--", label="θ = 0° (uniform)")
                 plt.xlabel("Distance from Windward Free End (m)")
@@ -856,8 +860,8 @@ def main():
             else: # For Circular Tank, Attached Canopy, Protection Screens
                 C_shp = C_shp_for_other_types
                 e = e_for_other_types
-                p_uls = calculator.calculate_wind_pressure(V_des_theta, C_shp)
-                p_sls = calculator.calculate_wind_pressure(V_des_theta_sls, C_shp)
+                p_uls = calculator.calculate_wind_pressure(V_des_theta, C_shp) # V_des_theta for ULS
+                p_sls = calculator.calculate_wind_pressure(V_des_theta_sls_ref_height, C_shp) # V_des_theta_sls_ref_height for SLS
                 
                 results[limit_state] = {
                     'V_R': V_R, 'V_sit_beta': V_sit_beta, 'V_des_theta': V_des_theta,
@@ -865,39 +869,41 @@ def main():
                     'reduction_factor': reduction_factor
                 }
 
-                # Generate pressure vs height graph only for Protection Screens (once for ULS for both plots)
-                if structure_type == "Protection Screens":
-                    heights, V_des_values_uls, pressures_uls_height = calculator.calculate_pressure_vs_height(
-                        region, terrain_category, reference_height, "ULS", importance_level, distance_from_coast_km, C_shp
-                    )
-                    _, V_des_values_sls, pressures_sls_height = calculator.calculate_pressure_vs_height(
-                        region, terrain_category, reference_height, "SLS", importance_level, distance_from_coast_km, C_shp
-                    )
-                    
-                    # Store height data and pressures in results for both ULS and SLS for the PDF
-                    results['ULS']['heights'] = heights
-                    results['ULS']['V_des_values_height_plot'] = V_des_values_uls
-                    results['ULS']['pressures_uls_height_plot'] = pressures_uls_height
-                    
-                    results['SLS']['heights'] = heights
-                    results['SLS']['V_des_values_height_plot'] = V_des_values_sls
-                    results['SLS']['pressures_sls_height_plot'] = pressures_sls_height
+        # --- Moved this block outside the loop to ensure results['ULS'] and results['SLS'] are fully populated first ---
+        if structure_type == "Protection Screens":
+            # These calculations need to be done ONLY ONCE for Protection Screens
+            # but their results (heights, pressures) are needed for both ULS and SLS keys in 'results'
+            heights, V_des_values_uls, pressures_uls_height = calculator.calculate_pressure_vs_height(
+                region, terrain_category, reference_height, "ULS", importance_level, distance_from_coast_km, C_shp_for_other_types
+            )
+            _, V_des_values_sls, pressures_sls_height = calculator.calculate_pressure_vs_height(
+                region, terrain_category, reference_height, "SLS", importance_level, distance_from_coast_km, C_shp_for_other_types
+            )
+            
+            # Now assign the calculated data to the respective ULS and SLS entries
+            results['ULS']['heights'] = heights
+            results['ULS']['V_des_values_height_plot'] = V_des_values_uls
+            results['ULS']['pressures_uls_height_plot'] = pressures_uls_height
+            
+            results['SLS']['heights'] = heights
+            results['SLS']['V_des_values_height_plot'] = V_des_values_sls
+            results['SLS']['pressures_sls_height_plot'] = pressures_sls_height
 
-                    # Plotting is done once, typically after ULS calculations are done for Protection Screens
-                    if limit_state == "ULS": # Generate the plot only once for ULS
-                        plt.figure(figsize=(8, 4))
-                        plt.plot(heights, pressures_uls_height, label="ULS", color="blue")
-                        plt.plot(heights, pressures_sls_height, label="SLS", color="green") # Use actual SLS pressures
-                        plt.xlabel("Height (m)")
-                        plt.ylabel("Wind Pressure (kPa)")
-                        plt.title(f"Wind Pressure vs. Height ({location}, Protection Screens)")
-                        plt.legend()
-                        plt.grid(True)
-                        graph_filename = "height_pressure_graph.png"
-                        plt.savefig(graph_filename, bbox_inches='tight', dpi=150)
-                        plt.close()
-                        results['ULS']['height_pressure_graph'] = graph_filename
-                        results['SLS']['height_pressure_graph'] = graph_filename # Both ULS and SLS can reference the same graph
+            # Plotting is done once for Protection Screens
+            plt.figure(figsize=(8, 4))
+            plt.plot(heights, pressures_uls_height, label="ULS", color="blue")
+            plt.plot(heights, pressures_sls_height, label="SLS", color="green")
+            plt.xlabel("Height (m)")
+            plt.ylabel("Wind Pressure (kPa)")
+            plt.title(f"Wind Pressure vs. Height ({location}, Protection Screens)")
+            plt.legend()
+            plt.grid(True)
+            graph_filename = "height_pressure_graph.png"
+            plt.savefig(graph_filename, bbox_inches='tight', dpi=150)
+            plt.close()
+            results['ULS']['height_pressure_graph'] = graph_filename
+            results['SLS']['height_pressure_graph'] = graph_filename # Both ULS and SLS can reference the same graph
+        # --- End of moved block ---
 
 
         pdf_data = generate_pdf_report(inputs, results, project_number, project_name)
