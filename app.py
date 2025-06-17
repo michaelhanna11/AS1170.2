@@ -417,7 +417,7 @@ class WindLoadCalculator:
         Assumptions:
             - Circular members (steel tubes).
             - Wind normal to the face (most critical for overall drag).
-            - Super-critical flow assumed for Cd lookup (conservative).
+            - Super-critical flow assumed for Cd lookup (conservative for higher wind speeds).
             - Simplified lambda for K_sh interpolation (using fixed lambda based on typical spacing).
         Args:
             solidity_ratio (float): User-provided overall solidity ratio (delta).
@@ -432,83 +432,68 @@ class WindLoadCalculator:
         delta = solidity_ratio
         
         # 1. Effective solidity (delta_e) - Clause C.2.2, for circular members.
-        # This formula is for a single open frame. For an overall scaffold, delta is typically considered.
-        # However, for consistency with Table C.2 which uses delta_e as an input, we calculate it.
+        # As per the standard, effective solidity for circular members is 1.2 * delta^1.75
         delta_e = 1.2 * (delta ** 1.75) 
 
         # 2. Drag force coefficient (Cd) for a single frame - Table C.6(B) for circular members.
-        # Assuming super-critical flow (bi*Vdes,theta >= 6 m2/s). This range generally provides higher Cd values
-        # for higher solidity, often conservative for design wind speeds.
-        # For simplicity, using "onto corner" values which are generally higher.
-        Cd_lookup_table = {
-            0.05: 1.6, # For delta <= 0.05, Cd = 1.6
-            0.1: 1.6,  # For delta <= 0.1, Cd = 1.6
-            0.2: 1.7,  # For delta <= 0.2, Cd = 1.7
-            0.3: 1.9   # For delta >= 0.3, Cd = 1.9
-        }
+        # Table C.6(B) for "Parts of structure in super-critical flow biVdes,θ ≥ 6 m2/s" (Onto corner values are conservative)
+        # Solidity (delta) | Onto face | Onto corner
+        # ------------------|-----------|------------
+        # <= 0.05          | 1.4       | 1.6
+        # 0.1              | 1.4       | 1.6
+        # 0.2              | 1.5       | 1.7
+        # >= 0.3           | 1.7       | 1.9
+
+        # Define the x-coordinates (solidity values) and y-coordinates (Cd values for 'onto corner')
+        # for interpolation. Ensure x-coordinates are strictly increasing.
+        solidity_points = [0.0, 0.05, 0.1, 0.2, 0.3, 1.0] # Extend ranges to cover 0 and 1
+        cd_onto_corner_points = [1.6, 1.6, 1.6, 1.7, 1.9, 1.9] # Corresponding Cd values for onto_corner
+
+        # Use np.interp for robust linear interpolation.
+        Cd_single_frame = np.interp(delta, solidity_points, cd_onto_corner_points)
         
-        Cd_single_frame = 0.0
-        solidity_keys = sorted(Cd_lookup_table.keys())
-        if delta <= solidity_keys[0]: # For delta <= 0.05
-            Cd_single_frame = Cd_lookup_table[solidity_keys[0]]
-        elif delta >= solidity_keys[-1]: # For delta >= 0.3
-            Cd_single_frame = Cd_lookup_table[solidity_keys[-1]]
-        else: # Linear interpolation for intermediate delta values
-            for i in range(len(solidity_keys) - 1):
-                s1, s2 = solidity_keys[i], solidity_keys[i+1]
-                if s1 <= delta <= s2:
-                    c1, c2 = Cd_lookup_table[s1], Cd_lookup_table[s2]
-                    Cd_single_frame = np.interp(delta, [s1, s2], [c1, c2])
-                    break
-        
+        # Ensure Cd is within reasonable bounds (e.g., non-negative, max from table)
+        Cd_single_frame = max(0.0, min(Cd_single_frame, 1.9)) # Max value from the table
+
         # 3. Shielding factor (K_sh) - Table C.2 for multiple frames.
-        # Assuming wind normal to frames (0 degrees).
-        # Lambda (spacing ratio) = frame spacing / (smaller of l or b of frame)
-        # For typical scaffolds, bay length (typical_bay_length_m) is the spacing.
-        # The smaller dimension of the frame (cross-section) could be typical_bay_width_m.
-        # Let's assume average lambda_ratio = 2.0 (e.g., 2.4m spacing / 1.2m width) for interpolation.
-        
-        lambda_val = 2.0 # A common lambda for scaffolding. More precise calculation would need more inputs.
+        # Assuming wind normal to frames (Angle of wind to frames (θ) = 0 degrees).
+        # We assume a fixed lambda = 2.0 based on typical scaffold bay width to length ratio (spacing/width).
+        # Lambda (spacing ratio) = frame spacing / (smaller of l or b of frame).
+        # If typical_bay_length_m (spacing) is 2.4m and typical_bay_width_m (frame dimension) is 1.2m, then lambda = 2.4/1.2 = 2.0.
 
-        # Table C.2 values for Angle 0 deg (wind normal to frames)
-        ksh_data_for_0_deg = {
-            0.0: 1.0, 0.1: 0.8, 0.2: 0.5, 0.3: 0.3, 0.4: 0.2, 0.5: 0.2, 0.7: 0.2, 1.0: 0.2 # lambda <= 0.2
-            # For lambda=2.0, values are: 1.0, 1.0, 0.9, 0.7, 0.6, 0.4, 0.2, 0.2
-        }
-        
-        # Using specific values from Table C.2 for lambda = 2.0 (interpolation for delta_e)
-        ksh_values_at_lambda_2 = {
-            0.0: 1.0, 0.1: 1.0, 0.2: 0.9, 0.3: 0.7, 0.4: 0.6, 0.5: 0.4, 0.7: 0.2, 1.0: 0.2
-        }
+        # Values from Table C.2 for Angle 0 deg, lambda = 2.0.
+        # Effective solidity (δe) | Shielding factor (Ksh)
+        # ------------------------|-----------------------
+        # <= 0.05                | 1.0 (approximated from 0.0)
+        # 0.1                    | 1.0
+        # 0.2                    | 0.9
+        # 0.3                    | 0.7
+        # 0.4                    | 0.6
+        # 0.5                    | 0.4
+        # 0.7                    | 0.2
+        # >= 1.0                 | 0.2
 
-        K_sh_interpolated = 0.0
-        solidity_keys_ksh = sorted(ksh_values_at_lambda_2.keys())
-        if delta_e <= solidity_keys_ksh[0]:
-            K_sh_interpolated = ksh_values_at_lambda_2[solidity_keys_ksh[0]]
-        elif delta_e >= solidity_keys_ksh[-1]:
-            K_sh_interpolated = ksh_values_at_lambda_2[solidity_keys_ksh[-1]]
-        else:
-            for i in range(len(solidity_keys_ksh) - 1):
-                s1, s2 = solidity_keys_ksh[i], solidity_keys_ksh[i+1]
-                if s1 <= delta_e <= s2:
-                    k1, k2 = ksh_values_at_lambda_2[s1], ksh_values_at_lambda_2[s2]
-                    if s2 - s1 == 0: 
-                        K_sh_interpolated = k1
-                    else:
-                        fraction = (delta_e - s1) / (s2 - s1)
-                        K_sh_interpolated = k1 + fraction * (k2 - k1)
-                    break
+        solidity_e_points = [0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0]
+        ksh_points = [1.0, 1.0, 1.0, 0.9, 0.7, 0.6, 0.4, 0.2, 0.2]
+
+        # Interpolate Ksh based on effective solidity (delta_e)
+        K_sh_interpolated = np.interp(delta_e, solidity_e_points, ksh_points)
+
+        # 4. Total C_shp calculation - Clause C.2.3, Equation C.2(5)
+        # C_shp = C_shp,1 + SUM(K_sh * C_shp,1)
+        # This simplifies to C_shp,1 * (1 + SUM(K_sh)) = Cd_single_frame * (1 + sum_Ksh)
+        # Sum is over subsequent downwind frames. If num_bays_length is 1 (single bay), sum is 0.
         
-        # Total K_sh summation. As per C.2.3, C_shp = C_shp,1 + sum(K_sh * C_shp,1)
-        # This simplifies to C_shp,1 * (1 + sum(K_sh))
-        # Sum is over subsequent downwind frames. If num_bays_length is 1, sum is 0.
         sum_Ksh = 0.0
         if num_bays_length > 1:
-            # For simplicity, assuming all subsequent frames apply the same K_sh
+            # Assuming all subsequent frames apply the same K_sh_interpolated value
             sum_Ksh = (num_bays_length - 1) * K_sh_interpolated 
         
-        C_shp_overall = Cd_single_frame * (1 + sum_Ksh) * num_rows_width # Multiply by number of rows width-wise
-                                                                         # This assumes each row behaves similarly
+        # The overall C_shp for the scaffold, considering multiple rows (width-wise)
+        # The standard states Cd for lattice sections is typically based on Az (area of members in one face)
+        # For multiple rows (num_rows_width), this multiplies the effective frontal area.
+        # This assumes each row is a similar "frame" and its drag contributes.
+        C_shp_overall = Cd_single_frame * (1 + sum_Ksh) * num_rows_width 
 
         return C_shp_overall
 
