@@ -322,37 +322,38 @@ class WindLoadCalculator:
             return max(V_sit_beta, 30.0)
         return V_sit_beta
 
-    def calculate_Cpn_freestanding_wall(self, b, c, h, theta, distance_from_windward_end=None, has_return_corner=False):
+    def calculate_Cpn_freestanding_wall(self, b, c, h, theta, solidity_ratio, distance_from_windward_end=None, has_return_corner=False):
         """
-        Calculates Net Pressure Coefficient (Cpn) for freestanding walls.
-        Ref: AS/NZS 1170.2:2021 Appendix B, Tables B.2(A), B.2(B), B.2(C), B.2(D).
+        Calculates Net Pressure Coefficient (Cpn) for freestanding walls, then applies K_p for C_shp.
+        Ref: AS/NZS 1170.2:2021 Appendix B, Tables B.2(A), B.2(B), B.2(C), B.2(D), Clause B.1.4.
         Args:
             b (float): Width of the wall (b, along wind direction for theta=0).
             c (float): Height of the wall.
             h (float): Reference height (total height of structure).
             theta (int): Wind direction (0, 45, or 90 degrees).
+            solidity_ratio (float): Solidity ratio (δ) of the wall.
             distance_from_windward_end (float, optional): Required for theta=45, 90.
             has_return_corner (bool): For 45 deg wind, if return corner extends > 1c.
         Returns:
-            tuple: (Cpn value, eccentricity e).
+            tuple: (C_shp value, eccentricity e).
         """
         b_over_c = b / c
         c_over_h = c / h
         
-        Cpn = 0.0 # Initialize Cpn
+        _Cpn_unadjusted = 0.0 # Initialize unadjusted Cpn
         e = 0.0 # Initialize eccentricity
 
         if theta == 0: # Wind normal to hoarding or wall (Table B.2(A))
             if 0.5 <= b_over_c <= 5:
                 if 0.2 <= c_over_h <= 1:
-                    Cpn = 1.3 + 0.5 * (0.3 + log10(b_over_c)) * (0.8 - c_over_h)
+                    _Cpn_unadjusted = 1.3 + 0.5 * (0.3 + log10(b_over_c)) * (0.8 - c_over_h)
                 else: # c/h < 0.2 (common for long, low walls)
-                    Cpn = 1.4 + 0.3 * log10(b_over_c)
+                    _Cpn_unadjusted = 1.4 + 0.3 * log10(b_over_c)
             else: # b/c > 5
                 if 0.2 <= c_over_h <= 1:
-                    Cpn = 1.7 - 0.5 * c_over_h
+                    _Cpn_unadjusted = 1.7 - 0.5 * c_over_h
                 else: # c/h < 0.2 (common for very long, very low walls)
-                    Cpn = 1.4 + 0.3 * log10(b_over_c) # For all b/c when c/h < 0.2
+                    _Cpn_unadjusted = 1.4 + 0.3 * log10(b_over_c) # For all b/c when c/h < 0.2
             e = 0.0
         elif theta == 45: # Wind at 45 degrees to hoarding or wall (Tables B.2(B) & B.2(C))
             if distance_from_windward_end is None:
@@ -360,31 +361,31 @@ class WindLoadCalculator:
             
             if 0.5 <= b_over_c <= 5: # Table B.2(B)
                 if 0.2 <= c_over_h <= 1:
-                    Cpn = 1.3 + 0.5 * (0.3 + log10(b_over_c)) * (0.8 - c_over_h)
+                    _Cpn_unadjusted = 1.3 + 0.5 * (0.3 + log10(b_over_c)) * (0.8 - c_over_h)
                 else: # c/h < 0.2
-                    Cpn = 1.4 + 0.3 * log10(b_over_c)
+                    _Cpn_unadjusted = 1.4 + 0.3 * log10(b_over_c)
             else: # b/c > 5 (Table B.2(C))
                 if c_over_h <= 0.7:
                     if distance_from_windward_end <= 2 * c:
-                        Cpn = 3.0
+                        _Cpn_unadjusted = 3.0
                     elif distance_from_windward_end <= 4 * c:
-                        Cpn = 1.5
+                        _Cpn_unadjusted = 1.5
                     else:
-                        Cpn = 0.75
+                        _Cpn_unadjusted = 0.75
                 else: # c/h > 0.7
                     if distance_from_windward_end <= 2 * h: # 'h' is total height (reference_height)
-                        Cpn = 2.4
+                        _Cpn_unadjusted = 2.4
                     elif distance_from_windward_end <= 4 * h:
-                        Cpn = 1.2
+                        _Cpn_unadjusted = 1.2
                     else:
-                        Cpn = 0.6
+                        _Cpn_unadjusted = 0.6
                 
                 # Apply return corner condition (note in Table B.2(C))
                 if has_return_corner:
                     if c_over_h <= 0.7 and distance_from_windward_end <= 2 * c:
-                        Cpn = 2.2 # Overrides 3.0
+                        _Cpn_unadjusted = 2.2 # Overrides 3.0
                     elif c_over_h > 0.7 and distance_from_windward_end <= 2 * h:
-                        Cpn = 1.8 # Overrides 2.4
+                        _Cpn_unadjusted = 1.8 # Overrides 2.4
             e = 0.2 * b # Eccentricity for 45 deg wind.
         elif theta == 90: # Wind parallel to hoarding or wall (Table B.2(D))
             if distance_from_windward_end is None:
@@ -392,104 +393,126 @@ class WindLoadCalculator:
             
             if c_over_h <= 0.7:
                 if distance_from_windward_end <= 2 * c:
-                    Cpn = 1.2
+                    _Cpn_unadjusted = 1.2
                 elif distance_from_windward_end <= 4 * c:
-                    Cpn = 0.6
+                    _Cpn_unadjusted = 0.6
                 else:
-                    Cpn = 0.3
+                    _Cpn_unadjusted = 0.3
             else: # c/h > 0.7
                 if distance_from_windward_end <= 2 * h: # 'h' is total height (reference_height)
-                    Cpn = 1.0
+                    _Cpn_unadjusted = 1.0
                 elif distance_from_windward_end <= 4 * h:
-                    Cpn = 0.25
+                    _Cpn_unadjusted = 0.25
                 else:
-                    Cpn = 0.25
-            Cpn = abs(Cpn) # Table B.2(D) values are +/-. For calculation, use absolute.
+                    _Cpn_unadjusted = 0.25
+            _Cpn_unadjusted = abs(_Cpn_unadjusted) # Table B.2(D) values are +/-. For calculation, use absolute.
             e = 0.0 # Eccentricity for 90 deg wind.
         else:
             raise ValueError("Theta must be 0°, 45°, or 90°.")
-        return Cpn, e
 
-    def _calculate_Cshp_open_scaffold(self, solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta):
+        # Apply Net Porosity Factor (K_p) - Clause B.1.4
+        K_p = 1 - (1 - solidity_ratio)**2 # K_p = 1 - (1 - delta)^2
+        C_shp = _Cpn_unadjusted * K_p
+        
+        return C_shp, e
+
+    def _calculate_Cshp_open_scaffold(self, solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta, reference_height, typical_bay_width_m):
+        """
+        Calculates Aerodynamic Shape Factor (Cshp) for an open (unclad) scaffold.
+        Ref: AS/NZS 1170.2:2021 Appendix C (Lattice towers), especially C.2.2, C.2.3, Table C.6(B), Table C.2.
+        Assumptions:
+            - Circular members (steel tubes).
+            - Wind normal to the face (most critical for overall drag).
+            - Flow regime (sub/super-critical) is determined dynamically.
+            - Lambda for K_sh interpolation calculated dynamically from bay dimensions.
+        Args:
+            solidity_ratio (float): User-provided overall solidity ratio (delta).
+            num_bays_length (int): Number of bays along the scaffold length.
+            num_rows_width (int): Number of rows perpendicular to the wind.
+            typical_bay_length_m (float): Length of a typical bay (used as spacing for lambda).
+            member_diameter_mm (float): Diameter of individual members (for bi*Vdes,theta).
+            V_des_theta (float): Design wind speed (m/s) at reference height.
+            reference_height (float): Total height of the scaffold.
+            typical_bay_width_m (float): Width of a typical bay.
+        Returns:
+            float: Calculated Cshp for the open scaffold.
+        """
         delta = solidity_ratio
+        
+        # 1. Effective solidity (delta_e) - Clause C.2.2, for circular members.
         delta_e = 1.2 * (delta ** 1.75) 
 
-        # Determine flow regime for Cd lookup (bi*Vdes,theta)
+        # 2. Drag force coefficient (Cd) for a single frame - Table C.6(B) for circular members.
         member_diameter_m = member_diameter_mm / 1000.0 # Convert mm to m
         bi_Vdes_theta = member_diameter_m * V_des_theta
 
-        # Define Cd lookup tables for both flow regimes (onto corner values)
-        # From AS/NZS 1170.2:2021 Table C.6(B)
+        # Define Cd lookup tables for both flow regimes (onto corner values, more conservative)
         solidity_points_cd = [0.0, 0.05, 0.1, 0.2, 0.3, 1.0] # Extended to 0 and 1 for interp
 
-        # Onto corner values for sub-critical flow (bi*Vdes_theta < 3 m^2/s)
-        cd_sub_critical_onto_corner = [2.5, 2.5, 2.3, 2.3, 2.3, 2.3] # Using values for <=0.05 (2.5), 0.1 (2.3), 0.2 (2.3), >=0.3 (2.3)
+        # Onto corner values for sub-critical flow (bi*Vdes_theta < 3 m^2/s) from Table C.6(B)
+        cd_sub_critical_onto_corner = [2.5, 2.5, 2.3, 2.3, 2.3, 2.3] 
 
-        # Onto corner values for super-critical flow (bi*Vdes_theta >= 6 m^2/s)
-        cd_super_critical_onto_corner = [1.6, 1.6, 1.6, 1.7, 1.9, 1.9] # Using values for <=0.05 (1.6), 0.1 (1.6), 0.2 (1.7), >=0.3 (1.9)
+        # Onto corner values for super-critical flow (bi*Vdes_theta >= 6 m^2/s) from Table C.6(B)
+        cd_super_critical_onto_corner = [1.6, 1.6, 1.6, 1.7, 1.9, 1.9] 
 
+        Cd_single_frame = 0.0
         if bi_Vdes_theta < 3.0: # Sub-critical flow
             Cd_single_frame = np.interp(delta, solidity_points_cd, cd_sub_critical_onto_corner)
         elif bi_Vdes_theta >= 6.0: # Super-critical flow
             Cd_single_frame = np.interp(delta, solidity_points_cd, cd_super_critical_onto_corner)
         else: # Transition flow (3.0 <= bi_Vdes_theta < 6.0), interpolate between critical and super-critical values
-            # Interpolate Cd values at 3.0 and 6.0 for the given delta
-            Cd_at_3 = np.interp(delta, solidity_points_cd, cd_sub_critical_onto_corner) # Use sub-critical for boundary at 3.0
-            Cd_at_6 = np.interp(delta, solidity_points_cd, cd_super_critical_onto_corner) # Use super-critical for boundary at 6.0
-
-            # Linearly interpolate between Cd_at_3 and Cd_at_6 based on bi_Vdes_theta
+            Cd_at_3 = np.interp(delta, solidity_points_cd, cd_sub_critical_onto_corner)
+            Cd_at_6 = np.interp(delta, solidity_points_cd, cd_super_critical_onto_corner)
             Cd_single_frame = np.interp(bi_Vdes_theta, [3.0, 6.0], [Cd_at_3, Cd_at_6])
 
-        # Clamp Cd_single_frame to plausible range from the table
-        Cd_single_frame = max(0.0, min(Cd_single_frame, 2.5)) # Max value from table is 2.5
+        # Clamp Cd_single_frame to plausible range from the table (max is 2.5 from sub-critical, max is 1.9 from super-critical)
+        # General upper bound to prevent extreme interpolation results outside table ranges.
+        Cd_single_frame = max(0.0, min(Cd_single_frame, 2.5)) 
 
         # 3. Shielding factor (K_sh) - Table C.2 for multiple frames.
-        # Calculate lambda dynamically: lambda = frame spacing / (smaller of l or b of frame)
-        # Assuming frame spacing = typical_bay_length_m, and frame dimension (b) = typical_bay_width_m
-        # Assuming frame height (l) = reference_height (total scaffold height)
-        # The 'smaller of l or b of frame' is actually smaller of (vertical dimension of frame) or (horizontal dimension of frame).
-        # For a single scaffold bay, this is typically min(reference_height, typical_bay_width_m).
+        # Lambda (spacing ratio) = frame spacing / (smaller of l or b of frame) - Clause C.2.3 definition for lambda.
+        # Here, frame spacing = typical_bay_length_m.
+        # For a vertical frame, 'l' is the height (reference_height) and 'b' is the width (typical_bay_width_m).
+        # We take the smaller of the two dimensions of a single frame (bay width or overall height).
+        frame_min_dimension = min(reference_height, typical_bay_width_m)
+        if frame_min_dimension <= 0: # Avoid division by zero if dimensions are invalid
+            lambda_val = 1.0 # Default to 1.0 if invalid dimensions
+        else:
+            lambda_val = typical_bay_length_m / frame_min_dimension
         
-        # However, Table C.2 refers to 'frame spacing ratio (lambda)' directly, where lambda is defined in C.2.3 as:
-        # lambda = frame spacing (centre-to-centre) / divided by the smaller of l or b.
-        # Here, 'l' and 'b' refer to dimensions of the *frame itself*.
-        # For a scaffold, if we consider a "frame" as a vertical slice, then l is height, b is width.
-        # Typical bay length (1.5m) is spacing. Typical bay width (1.5m) is 'b' of the frame.
-        # Let's assume the vertical length of the frame is the reference height.
+        # Clamp lambda_val to the range of Table C.2 for interpolation
+        lambda_points_ksh = [0.0, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, 1000.0] # Extended points for interpolation
         
-        # More accurately: lambda = typical_bay_length_m / min(reference_height, typical_bay_width_m)
-        lambda_val = typical_bay_length_m / min(reference_height, typical_bay_width_m)
-        
-        # Clamp lambda_val to the range of Table C.2
-        lambda_points = [0.0, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, 1000.0] # Extended points for interpolation
-        ksh_lambda_0_deg = { # Values for Angle 0 deg from Table C.2, for each lambda row
-            0.0: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # for delta_e 0.0
-            0.1: [0.8, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # for delta_e 0.1
-            0.2: [0.5, 0.8, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0], # for delta_e 0.2
-            0.3: [0.3, 0.6, 0.7, 0.7, 0.8, 1.0, 1.0, 1.0], # for delta_e 0.3
-            0.4: [0.2, 0.4, 0.5, 0.6, 0.7, 1.0, 1.0, 1.0], # for delta_e 0.4
-            0.5: [0.2, 0.2, 0.3, 0.4, 0.6, 1.0, 1.0, 1.0], # for delta_e 0.5
-            0.7: [0.2, 0.2, 0.2, 0.2, 0.4, 0.9, 1.0, 1.0], # for delta_e 0.7
-            1.0: [0.2, 0.2, 0.2, 0.2, 0.2, 0.8, 1.0, 1.0]  # for delta_e 1.0
+        # Values from Table C.2 for Angle 0 deg (wind normal to frames)
+        # Each inner list corresponds to a lambda_point: [lambda<=0.2, 0.5, 1.0, 2.0, 4.0, >=8.0]
+        # Data structure for Ksh based on delta_e rows and lambda columns
+        ksh_table_data = {
+            0.0: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # for delta_e 0.0 (extrapolated)
+            0.05: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # for delta_e 0.05 (from table, assuming values for lambda > 0.2 are 1.0)
+            0.1: [0.8, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], 
+            0.2: [0.5, 0.8, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0], 
+            0.3: [0.3, 0.6, 0.7, 0.7, 0.8, 1.0, 1.0, 1.0], 
+            0.4: [0.2, 0.4, 0.5, 0.6, 0.7, 1.0, 1.0, 1.0], 
+            0.5: [0.2, 0.2, 0.3, 0.4, 0.6, 1.0, 1.0, 1.0], 
+            0.7: [0.2, 0.2, 0.2, 0.2, 0.4, 0.9, 1.0, 1.0], 
+            1.0: [0.2, 0.2, 0.2, 0.2, 0.2, 0.8, 1.0, 1.0]  # for delta_e 1.0 (extrapolated)
         }
         
-        # Convert ksh_lambda_0_deg to a format suitable for 2D interpolation or sequential 1D interp
-        # Extract delta_e points for interpolation
-        solidity_e_points = sorted(ksh_lambda_0_deg.keys())
+        # Prepare data for 2D interpolation: x_points (delta_e), y_points (lambda_points), values (Ksh table)
+        solidity_e_points = sorted(ksh_table_data.keys())
         
-        # Interpolate Ksh based on delta_e and lambda_val
-        # First, interpolate for each delta_e point across lambda values to get Ksh for our lambda_val
-        ksh_for_our_lambda = []
+        # Interpolate Ksh for each effective solidity point across lambda values to get Ksh for our lambda_val
+        ksh_values_for_our_lambda = []
         for d_e_point in solidity_e_points:
-            ksh_vals_for_this_delta_e = ksh_lambda_0_deg[d_e_point]
-            # Ensure lambda_points are aligned with ksh_vals_for_this_delta_e
-            K_sh_interp_lambda = np.interp(lambda_val, lambda_points, ksh_vals_for_this_delta_e)
-            ksh_for_our_lambda.append(K_sh_interp_lambda)
+            ksh_vals_for_this_delta_e = ksh_table_data[d_e_point]
+            # Ensure lambda_points_ksh are aligned with ksh_vals_for_this_delta_e.
+            K_sh_interp_lambda = np.interp(lambda_val, lambda_points_ksh, ksh_vals_for_this_delta_e)
+            ksh_values_for_our_lambda.append(K_sh_interp_lambda)
 
         # Then, interpolate over delta_e using the Ksh values for our lambda_val
-        K_sh_interpolated = np.interp(delta_e, solidity_e_points, ksh_for_our_lambda)
+        K_sh_interpolated = np.interp(delta_e, solidity_e_points, ksh_values_for_our_lambda)
         
-        # Ensure K_sh_interpolated is within [0.2, 1.0] range of Table C.2
+        # Clamp K_sh_interpolated to the valid range [0.2, 1.0] from Table C.2.
         K_sh_interpolated = max(0.2, min(K_sh_interpolated, 1.0))
 
         # 4. Total C_shp calculation - Clause C.2.3, Equation C.2(5)
@@ -499,11 +522,11 @@ class WindLoadCalculator:
         
         sum_Ksh = 0.0
         if num_bays_length > 1:
-            # For simplicity, assuming all subsequent frames apply the same K_sh_interpolated value
+            # Assuming all subsequent frames apply the same K_sh_interpolated value
             sum_Ksh = (num_bays_length - 1) * K_sh_interpolated 
         
-        # The overall C_shp for the scaffold, considering multiple rows (width-wise)
-        # This multiplies the effective frontal area.
+        # The overall C_shp for the scaffold, considering multiple rows (width-wise).
+        # num_rows_width multiplies the effective frontal area.
         C_shp_overall = Cd_single_frame * (1 + sum_Ksh) * num_rows_width 
 
         return C_shp_overall
@@ -532,12 +555,13 @@ class WindLoadCalculator:
         Returns:
             tuple: (C_shp value, eccentricity e).
         """
-        K_p = 1.0 # Permeable cladding reduction factor (Kp) is 1.0 by default unless specified
+        # K_p is applied within calculate_Cpn_freestanding_wall now
         e = 0.0 # Default eccentricity to 0.0
 
         if structure_type == "Free Standing Wall":
-            Cpn, e = self.calculate_Cpn_freestanding_wall(b, c, h, theta, distance_from_windward_end, has_return_corner)
-            return Cpn * K_p, e
+            # Pass solidity_ratio to calculate_Cpn_freestanding_wall
+            C_shp, e = self.calculate_Cpn_freestanding_wall(b, c, h, theta, solidity_ratio, distance_from_windward_end, has_return_corner)
+            return C_shp, e
         elif structure_type == "Circular Tank":
             # Overall drag coefficient for circular sections, typically around 0.6-0.8 (Table 5.3(A) in old standards, or similar)
             return 0.8, e
@@ -552,7 +576,7 @@ class WindLoadCalculator:
             if scaffold_type == "Open (Unclad)":
                 if None in [solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta]:
                     raise ValueError("All scaffold parameters are required for Open (Unclad) Scaffold.")
-                C_shp_scaffold = self._calculate_Cshp_open_scaffold(solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta)
+                C_shp_scaffold = self._calculate_Cshp_open_scaffold(solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta, h, typical_bay_width_m)
                 return C_shp_scaffold, e
             elif scaffold_type == "Fully Clad":
                 # For a fully clad scaffold, treat it as a solid hoarding/wall.
@@ -577,7 +601,7 @@ class WindLoadCalculator:
         C_dyn = 1.0 # Dynamic response factor (default to 1.0 unless specific dynamic analysis is needed per Section 6)
         return (0.5 * rho_air) * (V_des_theta ** 2) * C_shp * C_dyn / 1000 # Convert Pa to kPa
 
-    def calculate_pressure_distribution(self, b, c, h, V_des_theta, theta, has_return_corner=False):
+    def calculate_pressure_distribution(self, b, c, h, V_des_theta, theta, has_return_corner=False, solidity_ratio=1.0):
         """
         Calculates wind pressure distribution along a Free Standing Wall for given theta.
         Args:
@@ -587,6 +611,7 @@ class WindLoadCalculator:
             V_des_theta (float): Design Wind Speed.
             theta (int): Wind direction.
             has_return_corner (bool): For 45 deg wind, if return corner extends > 1c.
+            solidity_ratio (float): Solidity ratio of the wall.
         Returns:
             tuple: (distances, pressures) numpy arrays.
         """
@@ -596,13 +621,13 @@ class WindLoadCalculator:
         for d in distances:
             # C_shp is distance-dependent for theta=45, 90 deg.
             C_shp, _ = self.calculate_aerodynamic_shape_factor(
-                "Free Standing Wall", None, b, c, h, theta, distance_from_windward_end=d, has_return_corner=has_return_corner
+                "Free Standing Wall", None, b, c, h, theta, distance_from_windward_end=d, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio
             )
             p = self.calculate_wind_pressure(V_des_theta, C_shp)
             pressures.append(p)
         return distances, pressures
 
-    def calculate_pressure_vs_height(self, region, terrain_category, reference_height, limit_state, importance_level, distance_from_coast_km, C_shp_base, scaffold_type=None, solidity_ratio=None, num_bays_length=None, num_rows_width=None, typical_bay_length_m=None, member_diameter_mm=None):
+    def calculate_pressure_vs_height(self, region, terrain_category, reference_height, limit_state, importance_level, distance_from_coast_km, C_shp_base, scaffold_type=None, solidity_ratio=None, num_bays_length=None, num_rows_width=None, typical_bay_length_m=None, member_diameter_mm=None, typical_bay_width_m=None):
         """
         Calculates wind pressure variation with height for structures where C_shp is constant with height
         (like Protection Screens, Tanks, Canopies, or a Simplified Scaffold model).
@@ -620,6 +645,7 @@ class WindLoadCalculator:
             num_rows_width (int, optional): Rows in width for Scaffold.
             typical_bay_length_m (float, optional): Typical bay length for Scaffold.
             member_diameter_mm (float, optional): Member diameter for Open Scaffold.
+            typical_bay_width_m (float, optional): Typical bay width for Scaffold.
         Returns:
             tuple: (heights, V_des_values, pressures) numpy arrays showing variation with height.
         """
@@ -831,6 +857,7 @@ def build_elements(inputs, results, project_number, project_name):
         input_data_raw.extend([
             ["Width of the Wall (b, m)", f"{inputs['b']:.2f}"],
             ["Height of the Wall (c, m)", f"{inputs['c']:.2f}"],
+            ["Solidity Ratio (δ)", f"{inputs['solidity_ratio_wall']:.3f}"], # Added solidity for wall
             ["Return Corner Extends More Than 1c", has_return_corner_text],
         ])
     elif structure_type == "Protection Screens":
@@ -1135,12 +1162,13 @@ def main():
 
     # Initialize all structure-specific variables to None. They will be populated
     # conditionally based on `structure_type` selection.
-    b = c = user_C_shp = length = width = solidity_ratio = num_bays_length = num_rows_width = typical_bay_length_m = typical_bay_width_m = member_diameter_mm = scaffold_type = None
+    b = c = user_C_shp = length = width = solidity_ratio = num_bays_length = num_rows_width = typical_bay_length_m = typical_bay_width_m = member_diameter_mm = scaffold_type = solidity_ratio_wall = None
     has_return_corner = False # Specific to Free Standing Wall
 
     if structure_type == "Free Standing Wall":
         b = st.number_input("Width of the Wall (b, m)", min_value=0.1, value=10.0, step=0.1)
         c = st.number_input("Height of the Wall (c, m)", min_value=0.1, max_value=reference_height, value=min(3.0, reference_height), step=0.1)
+        solidity_ratio_wall = st.number_input("Solidity Ratio (δ)", min_value=0.01, max_value=1.0, value=1.0, step=0.01, help="Ratio of solid area to total area. For solid walls, δ=1.0.")
         one_c = c
         st.write(f"Note: 1c = {one_c:.2f} m (based on wall height c)")
         has_return_corner = st.checkbox(f"Return Corner Extends More Than 1c ({one_c:.2f} m)")
@@ -1178,6 +1206,7 @@ def main():
             'b': b, 
             'c': c, 
             'has_return_corner': has_return_corner, 
+            'solidity_ratio_wall': solidity_ratio_wall, # Passed for Free Standing Wall
             'user_C_shp': user_C_shp, 
             'scaffold_type': scaffold_type, 
             'length': length, 
@@ -1222,13 +1251,17 @@ def main():
         C_shp_overall_for_table = 0.0 # Initialize to a safe default
         e_for_other_types = 0.0 # Default eccentricity to 0.0
 
-        if structure_type == "Protection Screens":
+        if structure_type == "Free Standing Wall":
+            # Pass solidity_ratio_wall to calculate_aerodynamic_shape_factor
+            C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(
+                structure_type, b=b, c=c, h=reference_height, theta=0, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio_wall
+            )
+        elif structure_type == "Protection Screens":
             C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(
                 structure_type, user_C_shp=user_C_shp
             )
         elif structure_type == "Scaffold":
             # Pass all scaffold related parameters for C_shp calculation
-            # Use V_des_theta_uls_ref_height for C_shp calculation (e.g. for Reynolds number if implemented)
             C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(
                 structure_type, 
                 scaffold_type=scaffold_type, 
@@ -1238,7 +1271,9 @@ def main():
                 typical_bay_length_m=typical_bay_length_m, 
                 typical_bay_width_m=typical_bay_width_m, 
                 member_diameter_mm=member_diameter_mm,
-                V_des_theta=V_des_theta_uls_ref_height 
+                V_des_theta=V_des_theta_uls_ref_height,
+                h=reference_height, # Pass reference_height for lambda calculation
+                typical_bay_width_m=typical_bay_width_m # Pass typical_bay_width_m for lambda calculation
             )
         elif structure_type in ["Circular Tank", "Attached Canopy"]:
              C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(structure_type)
@@ -1263,7 +1298,8 @@ def main():
                 thetas = [0, 45, 90]
                 theta_results = {}
                 for theta in thetas:
-                    C_shp_wall, e_wall = calculator.calculate_aerodynamic_shape_factor(structure_type, None, b, c, reference_height, theta, has_return_corner=has_return_corner)
+                    # Calculate C_shp for each angle, now including solidity_ratio_wall
+                    C_shp_wall, e_wall = calculator.calculate_Cpn_freestanding_wall(b, c, reference_height, theta, solidity_ratio_wall, has_return_corner=has_return_corner)
                     
                     # Calculate pressures for both ULS and SLS using their respective V_des_theta at reference height
                     p_uls_wall = calculator.calculate_wind_pressure(V_des_theta_uls_ref_height, C_shp_wall)
@@ -1279,8 +1315,9 @@ def main():
                             'resultant_force_sls': p_sls_wall * b * c,
                         }
                     else: # For 45, 90 degree distribution, store both ULS and SLS pressures
-                        distances, pressures_uls_dist = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_theta_uls_ref_height, theta, has_return_corner=has_return_corner)
-                        _, pressures_sls_dist = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_theta_sls_ref_height, theta, has_return_corner=has_return_corner)
+                        # Pass solidity_ratio_wall to calculate_pressure_distribution
+                        distances, pressures_uls_dist = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_theta_uls_ref_height, theta, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio_wall)
+                        _, pressures_sls_dist = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_theta_sls_ref_height, theta, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio_wall)
                         
                         theta_results[theta] = {
                             'distances': distances, 
@@ -1295,10 +1332,11 @@ def main():
                 # Use the V_des_theta specific to the current limit_state for plotting distribution
                 V_des_to_use_for_plot = V_des_theta_uls_ref_height if limit_state == "ULS" else V_des_theta_sls_ref_height
                 
-                distances_45, pressures_45 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 45, has_return_corner)
+                # Pass solidity_ratio_wall to calculate_pressure_distribution
+                distances_45, pressures_45 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 45, has_return_corner, solidity_ratio=solidity_ratio_wall)
                 plt.plot(distances_45, pressures_45, label="θ = 45°", color="blue")
                 
-                distances_90, pressures_90 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 90, has_return_corner)
+                distances_90, pressures_90 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 90, has_return_corner, solidity_ratio=solidity_ratio_wall)
                 plt.plot(distances_90, pressures_90, label="θ = 90°", color="green")
                 
                 p_0_val = theta_results[0]['p_uls'] if limit_state == "ULS" else theta_results[0]['p_sls']
@@ -1353,6 +1391,7 @@ def main():
                     'num_rows_width': num_rows_width,
                     'typical_bay_length_m': typical_bay_length_m,
                     'member_diameter_mm': member_diameter_mm,
+                    'typical_bay_width_m': typical_bay_width_m # Added for lambda calculation
                 })
 
             heights, V_des_values_uls_height_plot, pressures_uls_height_plot = calculator.calculate_pressure_vs_height(
