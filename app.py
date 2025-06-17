@@ -447,27 +447,22 @@ class WindLoadCalculator:
         bi_Vdes_theta = member_diameter_m * V_des_theta
 
         # Define Cd lookup tables for both flow regimes (onto corner values, more conservative)
-        # solidity_points_cd are the delta values from Table C.6(B)
-        solidity_points_cd = [0.0, 0.05, 0.1, 0.2, 0.3] # Table C.6(B) has <=0.05, 0.1, 0.2, >=0.3. Use 0.0 and 1.0 for bounds.
-        # Extend to 1.0 to handle delta up to 1.0, assuming values for >=0.3 hold.
-        solidity_points_cd_extended = [0.0, 0.05, 0.1, 0.2, 0.3, 1.0]
+        solidity_points_cd = [0.0, 0.05, 0.1, 0.2, 0.3, 1.0] # Extended to 0 and 1 for interp
 
         # Onto corner values for sub-critical flow (bi*Vdes_theta < 3 m^2/s) from Table C.6(B)
-        # For delta=0.0, assume Cd=2.5 (same as <=0.05). For delta=1.0, assume Cd=2.3 (same as >=0.3).
         cd_sub_critical_onto_corner = [2.5, 2.5, 2.3, 2.3, 2.3, 2.3] 
 
         # Onto corner values for super-critical flow (bi*Vdes_theta >= 6 m^2/s) from Table C.6(B)
-        # For delta=0.0, assume Cd=1.6 (same as <=0.05). For delta=1.0, assume Cd=1.9 (same as >=0.3).
         cd_super_critical_onto_corner = [1.6, 1.6, 1.6, 1.7, 1.9, 1.9] 
 
         Cd_single_frame = 0.0
         if bi_Vdes_theta < 3.0: # Sub-critical flow
-            Cd_single_frame = np.interp(delta, solidity_points_cd_extended, cd_sub_critical_onto_corner)
+            Cd_single_frame = np.interp(delta, solidity_points_cd, cd_sub_critical_onto_corner)
         elif bi_Vdes_theta >= 6.0: # Super-critical flow
-            Cd_single_frame = np.interp(delta, solidity_points_cd_extended, cd_super_critical_onto_corner)
+            Cd_single_frame = np.interp(delta, solidity_points_cd, cd_super_critical_onto_corner)
         else: # Transition flow (3.0 <= bi_Vdes_theta < 6.0), interpolate between critical and super-critical values
-            Cd_at_3 = np.interp(delta, solidity_points_cd_extended, cd_sub_critical_onto_corner)
-            Cd_at_6 = np.interp(delta, solidity_points_cd_extended, cd_super_critical_onto_corner)
+            Cd_at_3 = np.interp(delta, solidity_points_cd, cd_sub_critical_onto_corner)
+            Cd_at_6 = np.interp(delta, solidity_points_cd, cd_super_critical_onto_corner)
             Cd_single_frame = np.interp(bi_Vdes_theta, [3.0, 6.0], [Cd_at_3, Cd_at_6])
 
         # Clamp Cd_single_frame to plausible range from the table (max is 2.5 from sub-critical, max is 1.9 from super-critical)
@@ -498,11 +493,11 @@ class WindLoadCalculator:
             0.05: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # Extrapolated/assumed for delta_e=0.05
             0.1:  [0.8, 0.8, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], 
             0.2:  [0.5, 0.5, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0], 
-            0.3:  [0.3, 0.3, 0.6, 0.7, 0.7, 0.8, 1.0, 1.0], # Values for lambda 0.2 to 0.5 are adjusted to be consistent from table
-            0.4:  [0.2, 0.2, 0.4, 0.5, 0.6, 0.7, 1.0, 1.0], # Adjusted values based on table's rows and columns
-            0.5:  [0.2, 0.2, 0.2, 0.3, 0.4, 0.6, 1.0, 1.0], # Adjusted values based on table's rows and columns
-            0.7:  [0.2, 0.2, 0.2, 0.2, 0.2, 0.4, 0.9, 1.0], # Adjusted values
-            1.0:  [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.8, 1.0] # Extrapolated/assumed for delta_e=1.0. For lambda 0.2 and 0.5, use 0.2. For 1.0 use 0.2. For 2.0 use 0.2. For 4.0 use 0.2. For 8.0 use 0.8.
+            0.3:  [0.3, 0.3, 0.6, 0.7, 0.7, 0.8, 1.0, 1.0], 
+            0.4:  [0.2, 0.2, 0.4, 0.5, 0.6, 0.7, 1.0, 1.0], 
+            0.5:  [0.2, 0.2, 0.2, 0.3, 0.4, 0.6, 1.0, 1.0], 
+            0.7:  [0.2, 0.2, 0.2, 0.2, 0.2, 0.4, 0.9, 1.0], 
+            1.0:  [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.8, 1.0] 
         }
         
         # Prepare data for 2D interpolation: x_points (delta_e), y_points (lambda_points), values (Ksh table)
@@ -537,7 +532,7 @@ class WindLoadCalculator:
 
         return C_shp_overall
 
-    def calculate_aerodynamic_shape_factor(self, structure_type, user_C_shp=None, b=None, c=None, h=None, theta=None, distance_from_windward_end=None, has_return_corner=False, scaffold_type=None, solidity_ratio=None, num_bays_length=None, num_rows_width=None, typical_bay_length_m=None, typical_bay_width_m=None, member_diameter_mm=None, V_des_theta=None):
+    def calculate_aerodynamic_shape_factor(self, structure_type, user_C_shp=None, b=None, c=None, h=None, theta=None, distance_from_windward_end=None, has_return_corner=False, solidity_ratio=None, scaffold_type=None, num_bays_length=None, num_rows_width=None, typical_bay_length_m=None, typical_bay_width_m=None, member_diameter_mm=None, V_des_theta=None):
         """
         Determines the Aerodynamic Shape Factor (C_shp) for various structure types.
         Ref: AS/NZS 1170.2:2021 Section 5 and Appendix B, C.
@@ -550,8 +545,8 @@ class WindLoadCalculator:
             theta (int, optional): Wind direction for Free Standing Wall.
             distance_from_windward_end (float, optional): For Free Standing Wall (theta=45, 90).
             has_return_corner (bool, optional): For Free Standing Wall (theta=45).
+            solidity_ratio (float, optional): Solidity for Free Standing Wall or Open Scaffold.
             scaffold_type (str, optional): "Open (Unclad)" or "Fully Clad" for Scaffold.
-            solidity_ratio (float, optional): Solidity for Open Scaffold.
             num_bays_length (int, optional): Bays in length for Scaffold.
             num_rows_width (int, optional): Rows in width for Scaffold.
             typical_bay_length_m (float, optional): Typical bay length for Scaffold.
@@ -561,7 +556,6 @@ class WindLoadCalculator:
         Returns:
             tuple: (C_shp value, eccentricity e).
         """
-        # K_p is applied within calculate_Cpn_freestanding_wall now
         e = 0.0 # Default eccentricity to 0.0
 
         if structure_type == "Free Standing Wall":
@@ -931,79 +925,45 @@ def build_elements(inputs, results, project_number, project_name):
         elements.append(Spacer(1, 4*mm))
 
         if structure_type == "Free Standing Wall":
-            thetas = sorted(data['results'].keys())
-            for theta in thetas:
-                theta_data = data['results'][theta]
-                elements.append(Paragraph(f"Wind Direction: θ = {theta}°", normal_style))
-                if theta == 0:
-                    if limit_state == "ULS":
-                        table_data = [
-                            [
-                                Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
-                                Paragraph("Eccentricity (e, m)", table_header_style),
-                                Paragraph("<b>Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
-                                Paragraph("Resultant Force (kN) (ULS)", table_header_style),
-                            ],
-                            [
-                                Paragraph(f"{theta_data['C_shp']:.3f}", table_cell_style),
-                                Paragraph(f"{theta_data['e']:.2f}", table_cell_style),
-                                Paragraph(f"{theta_data['p_uls']:.3f}", table_cell_style),
-                                Paragraph(f"{theta_data['resultant_force_uls']:.2f}", table_cell_style),
-                            ]
-                        ]
-                        result_table = Table(table_data, colWidths=[45*mm, 35*mm, 35*mm, 35*mm])
-                    else:  # SLS
-                        table_data = [
-                            [
-                                Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
-                                Paragraph("Eccentricity (e, m)", table_header_style),
-                                Paragraph("Wind Pressure (p, kPa) (SLS)", table_header_style),
-                                Paragraph("Resultant Force (kN) (SLS)", table_header_style),
-                            ],
-                            [
-                                Paragraph(f"{theta_data['C_shp']:.3f}", table_cell_style),
-                                Paragraph(f"{theta_data['e']:.2f}", table_cell_style),
-                                Paragraph(f"{theta_data['p_sls']:.3f}", table_cell_style),
-                                Paragraph(f"{theta_data['resultant_force_sls']:.2f}", table_cell_style),
-                            ]
-                        ]
-                        result_table = Table(table_data, colWidths=[45*mm, 35*mm, 35*mm, 35*mm])
-                else:
-                    if limit_state == "ULS":
-                        table_data = [
-                            [
-                                Paragraph("Distance from Windward End (m)", table_header_style),
-                                Paragraph("<b>Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
-                            ]
-                        ]
-                        distances = theta_data['distances']
-                        pressures = theta_data['pressures_uls']
-                        step = max(1, len(distances) // 5)
-                        for i in range(0, len(distances), step):
-                            table_data.append([
-                                Paragraph(f"{distances[i]:.2f}", table_cell_style),
-                                Paragraph(f"{pressures[i]:.3f}", table_cell_style),
-                            ])
-                        result_table = Table(table_data, colWidths=[90*mm, 90*mm])
-                    else:  # SLS
-                        table_data = [
-                            [
-                                Paragraph("Distance from Windward End (m)", table_header_style),
-                                Paragraph("Wind Pressure (p, kPa) (SLS)", table_header_style),
-                            ]
-                        ]
-                        distances = theta_data['distances']
-                        pressures = theta_data['pressures_sls']
-                        step = max(1, len(distances) // 5)
-                        for i in range(0, len(distances), step):
-                            table_data.append([
-                                Paragraph(f"{distances[i]:.2f}", table_cell_style),
-                                Paragraph(f"{pressures[i]:.3f}", table_cell_style),
-                            ])
-                        result_table = Table(table_data, colWidths=[90*mm, 90*mm])
-                result_table.setStyle(table_style)
-                elements.append(result_table)
-                elements.append(Spacer(1, 4*mm))
+            # For Free Standing Wall, we display uniform C_shp for theta=0 in table,
+            # and distributions for theta=45,90 in graph.
+            theta_data_0 = data['results'][0]
+            elements.append(Paragraph(f"Wind Direction: θ = 0°", normal_style))
+            if limit_state == "ULS":
+                table_data = [
+                    [
+                        Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                        Paragraph("Eccentricity (e, m)", table_header_style),
+                        Paragraph("<b>Wind Pressure (p, kPa) (ULS)</b>", table_header_style),
+                        Paragraph("Resultant Force (kN) (ULS)", table_header_style),
+                    ],
+                    [
+                        Paragraph(f"{theta_data_0['C_shp']:.3f}", table_cell_style),
+                        Paragraph(f"{theta_data_0['e']:.2f}", table_cell_style),
+                        Paragraph(f"{theta_data_0['p_uls']:.3f}", table_cell_style),
+                        Paragraph(f"{theta_data_0['resultant_force_uls']:.2f}", table_cell_style),
+                    ]
+                ]
+                result_table = Table(table_data, colWidths=[45*mm, 35*mm, 35*mm, 35*mm])
+            else:  # SLS
+                table_data = [
+                    [
+                        Paragraph("Aerodynamic Shape Factor (<i>C<sub>shp</sub></i>)", table_header_style),
+                        Paragraph("Eccentricity (e, m)", table_header_style),
+                        Paragraph("Wind Pressure (p, kPa) (SLS)", table_header_style),
+                        Paragraph("Resultant Force (kN) (SLS)", table_header_style),
+                    ],
+                    [
+                        Paragraph(f"{theta_data_0['C_shp']:.3f}", table_cell_style),
+                        Paragraph(f"{theta_data_0['e']:.2f}", table_cell_style),
+                        Paragraph(f"{theta_data_0['p_sls']:.3f}", table_cell_style),
+                        Paragraph(f"{theta_data_0['resultant_force_sls']:.2f}", table_cell_style),
+                    ]
+                ]
+                result_table = Table(table_data, colWidths=[45*mm, 35*mm, 35*mm, 35*mm])
+            result_table.setStyle(table_style)
+            elements.append(result_table)
+            elements.append(Spacer(1, 4*mm))
 
             # Show graph for both ULS and SLS for Free Standing Wall
             elements.append(Paragraph(f"Pressure Distribution Graph ({limit_state})", heading_style))
@@ -1106,7 +1066,7 @@ def generate_pdf_report(inputs, results, project_number, project_name):
 
         # Second pass to build the actual PDF with correct total page count in footer
         pdf_buffer = io.BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagespace=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
         elements = build_elements(inputs, results, project_number, project_name) # Re-build elements for final PDF
 
         def final_footer(canvas, doc):
@@ -1273,8 +1233,9 @@ def main():
 
         if structure_type == "Free Standing Wall":
             # Pass solidity_ratio_wall to calculate_aerodynamic_shape_factor
+            # For the table, we always show theta=0's C_shp
             C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(
-                structure_type, b=b, c=c, h=reference_height, theta=0, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio_wall
+                structure_type, b=b, c=c, h=reference_height, theta=0, solidity_ratio=solidity_ratio_wall, has_return_corner=has_return_corner
             )
         elif structure_type == "Protection Screens":
             C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(
@@ -1291,8 +1252,8 @@ def main():
                 typical_bay_length_m=typical_bay_length_m, 
                 typical_bay_width_m=typical_bay_width_m, 
                 member_diameter_mm=member_diameter_mm,
-                V_des_theta=V_des_theta_uls_ref_height,
-                h=reference_height, # Pass reference_height for lambda calculation
+                V_des_theta=V_des_theta_uls_ref_height, # Use V_des_theta_uls_ref_height for flow regime determination
+                h=reference_height # Pass reference_height for lambda calculation
             )
         elif structure_type in ["Circular Tank", "Attached Canopy"]:
              C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(structure_type)
@@ -1314,52 +1275,40 @@ def main():
             V_des_theta_summary = calculator.calculate_design_wind_speed(V_sit_beta_summary, limit_state)
 
             if structure_type == "Free Standing Wall":
-                thetas = [0, 45, 90]
-                theta_results = {}
-                for theta in thetas:
-                    # Calculate C_shp for each angle, now including solidity_ratio_wall
-                    C_shp_wall, e_wall = calculator.calculate_Cpn_freestanding_wall(b, c, reference_height, theta, solidity_ratio_wall, has_return_corner=has_return_corner)
-                    
-                    # Calculate pressures for both ULS and SLS using their respective V_des_theta at reference height
-                    p_uls_wall = calculator.calculate_wind_pressure(V_des_theta_uls_ref_height, C_shp_wall)
-                    p_sls_wall = calculator.calculate_wind_pressure(V_des_theta_sls_ref_height, C_shp_wall)
-                    
-                    # Store results based on current limit_state
-                    if theta == 0:
-                        theta_results[theta] = {
-                            'C_shp': C_shp_wall, 'e': e_wall, 
-                            'p_uls': p_uls_wall, 
-                            'p_sls': p_sls_wall,
-                            'resultant_force_uls': p_uls_wall * b * c,
-                            'resultant_force_sls': p_sls_wall * b * c,
-                        }
-                    else: # For 45, 90 degree distribution, store both ULS and SLS pressures
-                        # Pass solidity_ratio_wall to calculate_pressure_distribution
-                        distances, pressures_uls_dist = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_theta_uls_ref_height, theta, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio_wall)
-                        _, pressures_sls_dist = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_theta_sls_ref_height, theta, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio_wall)
-                        
-                        theta_results[theta] = {
-                            'distances': distances, 
-                            'pressures_uls': pressures_uls_dist,
-                            'pressures_sls': pressures_sls_dist,
-                            'max_pressure_uls': max(pressures_uls_dist), 
-                            'max_pressure_sls': max(pressures_sls_dist),
-                        }
+                # For Free Standing Wall, we store results for theta=0 in theta_results
+                # The plots will be generated separately using calculate_pressure_distribution
+                
+                # Calculate for theta = 0 (uniform pressure) for the summary table
+                C_shp_0_deg, e_0_deg = calculator.calculate_Cpn_freestanding_wall(
+                    b, c, reference_height, 0, solidity_ratio_wall, distance_from_windward_end=0 # Pass dummy 0 for distance, will be ignored by theta=0 logic
+                )
+                p_uls_0_deg = calculator.calculate_wind_pressure(V_des_theta_uls_ref_height, C_shp_0_deg)
+                p_sls_0_deg = calculator.calculate_wind_pressure(V_des_theta_sls_ref_height, C_shp_0_deg)
+
+                theta_results = {
+                    0: {
+                        'C_shp': C_shp_0_deg, 'e': e_0_deg, 
+                        'p_uls': p_uls_0_deg, 
+                        'p_sls': p_sls_0_deg,
+                        'resultant_force_uls': p_uls_0_deg * b * c,
+                        'resultant_force_sls': p_sls_0_deg * b * c,
+                    }
+                }
 
                 # Generate pressure distribution graph for the current limit state for Free Standing Wall
                 plt.figure(figsize=(8, 4))
-                # Use the V_des_theta specific to the current limit_state for plotting distribution
                 V_des_to_use_for_plot = V_des_theta_uls_ref_height if limit_state == "ULS" else V_des_theta_sls_ref_height
                 
-                # Pass solidity_ratio_wall to calculate_pressure_distribution
-                distances_45, pressures_45 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 45, has_return_corner, solidity_ratio=solidity_ratio_wall)
+                # Plot for theta = 45 (distributed pressure)
+                distances_45, pressures_45 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 45, solidity_ratio_wall, has_return_corner=has_return_corner)
                 plt.plot(distances_45, pressures_45, label="θ = 45°", color="blue")
                 
-                distances_90, pressures_90 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 90, has_return_corner, solidity_ratio=solidity_ratio_wall)
+                # Plot for theta = 90 (distributed pressure)
+                distances_90, pressures_90 = calculator.calculate_pressure_distribution(b, c, reference_height, V_des_to_use_for_plot, 90, solidity_ratio_wall, has_return_corner=has_return_corner)
                 plt.plot(distances_90, pressures_90, label="θ = 90°", color="green")
                 
-                p_0_val = theta_results[0]['p_uls'] if limit_state == "ULS" else theta_results[0]['p_sls']
-                plt.axhline(y=p_0_val, color="red", linestyle="--", label="θ = 0° (uniform)")
+                # Add uniform pressure for theta = 0
+                plt.axhline(y=p_uls_0_deg if limit_state == "ULS" else p_sls_0_deg, color="red", linestyle="--", label="θ = 0° (uniform)")
 
                 plt.xlabel("Distance from Windward Free End (m)")
                 plt.ylabel("Wind Pressure (kPa)")
@@ -1438,11 +1387,10 @@ def main():
             plt.title(f"Wind Pressure vs. Height ({location}, {structure_type})")
             plt.legend()
             plt.grid(True)
-            graph_filename = "height_pressure_graph.png"
-            plt.savefig(graph_filename, bbox_inches='tight', dpi=150)
+            plt.savefig("height_pressure_graph.png", bbox_inches='tight', dpi=150)
             plt.close()
-            results['ULS']['height_pressure_graph'] = graph_filename
-            results['SLS']['height_pressure_graph'] = graph_filename # Both ULS and SLS can reference the same graph
+            results['ULS']['height_pressure_graph'] = "height_pressure_graph.png"
+            results['SLS']['height_pressure_graph'] = "height_pressure_graph.png" # Both ULS and SLS can reference the same graph
         # --- End of moved block ---
 
 
