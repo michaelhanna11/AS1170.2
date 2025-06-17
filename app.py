@@ -447,55 +447,62 @@ class WindLoadCalculator:
         bi_Vdes_theta = member_diameter_m * V_des_theta
 
         # Define Cd lookup tables for both flow regimes (onto corner values, more conservative)
-        solidity_points_cd = [0.0, 0.05, 0.1, 0.2, 0.3, 1.0] # Extended to 0 and 1 for interp
+        # solidity_points_cd are the delta values from Table C.6(B)
+        solidity_points_cd = [0.0, 0.05, 0.1, 0.2, 0.3] # Table C.6(B) has <=0.05, 0.1, 0.2, >=0.3. Use 0.0 and 1.0 for bounds.
+        # Extend to 1.0 to handle delta up to 1.0, assuming values for >=0.3 hold.
+        solidity_points_cd_extended = [0.0, 0.05, 0.1, 0.2, 0.3, 1.0]
 
         # Onto corner values for sub-critical flow (bi*Vdes_theta < 3 m^2/s) from Table C.6(B)
+        # For delta=0.0, assume Cd=2.5 (same as <=0.05). For delta=1.0, assume Cd=2.3 (same as >=0.3).
         cd_sub_critical_onto_corner = [2.5, 2.5, 2.3, 2.3, 2.3, 2.3] 
 
         # Onto corner values for super-critical flow (bi*Vdes_theta >= 6 m^2/s) from Table C.6(B)
+        # For delta=0.0, assume Cd=1.6 (same as <=0.05). For delta=1.0, assume Cd=1.9 (same as >=0.3).
         cd_super_critical_onto_corner = [1.6, 1.6, 1.6, 1.7, 1.9, 1.9] 
 
         Cd_single_frame = 0.0
         if bi_Vdes_theta < 3.0: # Sub-critical flow
-            Cd_single_frame = np.interp(delta, solidity_points_cd, cd_sub_critical_onto_corner)
+            Cd_single_frame = np.interp(delta, solidity_points_cd_extended, cd_sub_critical_onto_corner)
         elif bi_Vdes_theta >= 6.0: # Super-critical flow
-            Cd_single_frame = np.interp(delta, solidity_points_cd, cd_super_critical_onto_corner)
+            Cd_single_frame = np.interp(delta, solidity_points_cd_extended, cd_super_critical_onto_corner)
         else: # Transition flow (3.0 <= bi_Vdes_theta < 6.0), interpolate between critical and super-critical values
-            Cd_at_3 = np.interp(delta, solidity_points_cd, cd_sub_critical_onto_corner)
-            Cd_at_6 = np.interp(delta, solidity_points_cd, cd_super_critical_onto_corner)
+            Cd_at_3 = np.interp(delta, solidity_points_cd_extended, cd_sub_critical_onto_corner)
+            Cd_at_6 = np.interp(delta, solidity_points_cd_extended, cd_super_critical_onto_corner)
             Cd_single_frame = np.interp(bi_Vdes_theta, [3.0, 6.0], [Cd_at_3, Cd_at_6])
 
         # Clamp Cd_single_frame to plausible range from the table (max is 2.5 from sub-critical, max is 1.9 from super-critical)
-        # General upper bound to prevent extreme interpolation results outside table ranges.
         Cd_single_frame = max(0.0, min(Cd_single_frame, 2.5)) 
 
         # 3. Shielding factor (K_sh) - Table C.2 for multiple frames.
         # Lambda (spacing ratio) = frame spacing / (smaller of l or b of frame) - Clause C.2.3 definition for lambda.
         # Here, frame spacing = typical_bay_length_m.
-        # For a vertical frame, 'l' is the height (reference_height) and 'b' is the width (typical_bay_width_m).
-        # We take the smaller of the two dimensions of a single frame (bay width or overall height).
+        # 'l' (vertical frame dimension) = reference_height (total scaffold height).
+        # 'b' (horizontal frame dimension) = typical_bay_width_m.
         frame_min_dimension = min(reference_height, typical_bay_width_m)
-        if frame_min_dimension <= 0: # Avoid division by zero if dimensions are invalid
-            lambda_val = 1.0 # Default to 1.0 if invalid dimensions
+        if frame_min_dimension <= 0: # Avoid division by zero if dimensions are invalid or zero.
+            lambda_val = 1.0 # Default to 1.0 if invalid dimensions.
         else:
             lambda_val = typical_bay_length_m / frame_min_dimension
         
         # Clamp lambda_val to the range of Table C.2 for interpolation
+        # Table C.2 lambda points are: <=0.2, 0.5, 1.0, 2.0, 4.0, >=8.0
+        # We need to map these to numerical values for np.interp
         lambda_points_ksh = [0.0, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, 1000.0] # Extended points for interpolation
         
-        # Values from Table C.2 for Angle 0 deg (wind normal to frames)
-        # Each inner list corresponds to a lambda_point: [lambda<=0.2, 0.5, 1.0, 2.0, 4.0, >=8.0]
-        # Data structure for Ksh based on delta_e rows and lambda columns
+        # Data structure for Ksh based on delta_e rows and lambda columns from Table C.2 (Angle 0 deg)
+        # Each inner list corresponds to a lambda_point: [lambda=0.0, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, 1000.0]
+        # (Using first value for lambda <= 0.2 and last for lambda >= 8.0)
         ksh_table_data = {
-            0.0: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # for delta_e 0.0 (extrapolated)
-            0.05: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # for delta_e 0.05 (from table, assuming values for lambda > 0.2 are 1.0)
-            0.1: [0.8, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], 
-            0.2: [0.5, 0.8, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0], 
-            0.3: [0.3, 0.6, 0.7, 0.7, 0.8, 1.0, 1.0, 1.0], 
-            0.4: [0.2, 0.4, 0.5, 0.6, 0.7, 1.0, 1.0, 1.0], 
-            0.5: [0.2, 0.2, 0.3, 0.4, 0.6, 1.0, 1.0, 1.0], 
-            0.7: [0.2, 0.2, 0.2, 0.2, 0.4, 0.9, 1.0, 1.0], 
-            1.0: [0.2, 0.2, 0.2, 0.2, 0.2, 0.8, 1.0, 1.0]  # for delta_e 1.0 (extrapolated)
+            # delta_e: [ksh_at_lambda_0.0, ksh_at_lambda_0.2, ksh_at_lambda_0.5, ksh_at_lambda_1.0, ksh_at_lambda_2.0, ksh_at_lambda_4.0, ksh_at_lambda_8.0, ksh_at_lambda_inf]
+            0.0:  [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # Extrapolated/assumed for delta_e=0.0
+            0.05: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # Extrapolated/assumed for delta_e=0.05
+            0.1:  [0.8, 0.8, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], 
+            0.2:  [0.5, 0.5, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0], 
+            0.3:  [0.3, 0.3, 0.6, 0.7, 0.7, 0.8, 1.0, 1.0], # Values for lambda 0.2 to 0.5 are adjusted to be consistent from table
+            0.4:  [0.2, 0.2, 0.4, 0.5, 0.6, 0.7, 1.0, 1.0], # Adjusted values based on table's rows and columns
+            0.5:  [0.2, 0.2, 0.2, 0.3, 0.4, 0.6, 1.0, 1.0], # Adjusted values based on table's rows and columns
+            0.7:  [0.2, 0.2, 0.2, 0.2, 0.2, 0.4, 0.9, 1.0], # Adjusted values
+            1.0:  [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.8, 1.0] # Extrapolated/assumed for delta_e=1.0. For lambda 0.2 and 0.5, use 0.2. For 1.0 use 0.2. For 2.0 use 0.2. For 4.0 use 0.2. For 8.0 use 0.8.
         }
         
         # Prepare data for 2D interpolation: x_points (delta_e), y_points (lambda_points), values (Ksh table)
@@ -505,7 +512,6 @@ class WindLoadCalculator:
         ksh_values_for_our_lambda = []
         for d_e_point in solidity_e_points:
             ksh_vals_for_this_delta_e = ksh_table_data[d_e_point]
-            # Ensure lambda_points_ksh are aligned with ksh_vals_for_this_delta_e.
             K_sh_interp_lambda = np.interp(lambda_val, lambda_points_ksh, ksh_vals_for_this_delta_e)
             ksh_values_for_our_lambda.append(K_sh_interp_lambda)
 
@@ -574,7 +580,7 @@ class WindLoadCalculator:
             return user_C_shp, e
         elif structure_type == "Scaffold":
             if scaffold_type == "Open (Unclad)":
-                if None in [solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta]:
+                if None in [solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta, h, typical_bay_width_m]:
                     raise ValueError("All scaffold parameters are required for Open (Unclad) Scaffold.")
                 C_shp_scaffold = self._calculate_Cshp_open_scaffold(solidity_ratio, num_bays_length, num_rows_width, typical_bay_length_m, member_diameter_mm, V_des_theta, h, typical_bay_width_m)
                 return C_shp_scaffold, e
@@ -601,7 +607,7 @@ class WindLoadCalculator:
         C_dyn = 1.0 # Dynamic response factor (default to 1.0 unless specific dynamic analysis is needed per Section 6)
         return (0.5 * rho_air) * (V_des_theta ** 2) * C_shp * C_dyn / 1000 # Convert Pa to kPa
 
-    def calculate_pressure_distribution(self, b, c, h, V_des_theta, theta, has_return_corner=False, solidity_ratio=1.0):
+    def calculate_pressure_distribution(self, b, c, h, V_des_theta, theta, solidity_ratio, has_return_corner=False):
         """
         Calculates wind pressure distribution along a Free Standing Wall for given theta.
         Args:
@@ -610,8 +616,8 @@ class WindLoadCalculator:
             h (float): Reference height (total structure height).
             V_des_theta (float): Design Wind Speed.
             theta (int): Wind direction.
-            has_return_corner (bool): For 45 deg wind, if return corner extends > 1c.
             solidity_ratio (float): Solidity ratio of the wall.
+            has_return_corner (bool): For 45 deg wind, if return corner extends > 1c.
         Returns:
             tuple: (distances, pressures) numpy arrays.
         """
@@ -620,6 +626,7 @@ class WindLoadCalculator:
         pressures = []
         for d in distances:
             # C_shp is distance-dependent for theta=45, 90 deg.
+            # Pass solidity_ratio to calculate_aerodynamic_shape_factor
             C_shp, _ = self.calculate_aerodynamic_shape_factor(
                 "Free Standing Wall", None, b, c, h, theta, distance_from_windward_end=d, has_return_corner=has_return_corner, solidity_ratio=solidity_ratio
             )
@@ -682,10 +689,23 @@ class WindLoadCalculator:
 
             # C_shp for these types (Protection Screens, Scaffold, etc.) are generally assumed constant with height,
             # using the C_shp_base calculated at the reference height.
-            # If the C_shp calculation for scaffolds became Reynolds-number dependent (on V_des_theta),
-            # this part would need to re-evaluate C_shp_base for each h_current.
-            # For current implementation, C_shp_base is sufficient.
-            C_shp_at_current_height = C_shp_base 
+            # However, for an Open (Unclad) Scaffold, the C_shp calculation depends on V_des_theta (for flow regime)
+            # and height (for lambda calculation if reference_height is used as frame dimension).
+            # So, re-calculate C_shp for Open (Unclad) Scaffold at each height.
+            C_shp_at_current_height = C_shp_base # Default to the C_shp calculated at reference height
+            if scaffold_type == "Open (Unclad)":
+                C_shp_at_current_height, _ = self.calculate_aerodynamic_shape_factor( # The _ here is a dummy for eccentricity
+                    "Scaffold", 
+                    scaffold_type=scaffold_type, 
+                    solidity_ratio=solidity_ratio, 
+                    num_bays_length=num_bays_length, 
+                    num_rows_width=num_rows_width, 
+                    typical_bay_length_m=typical_bay_length_m, 
+                    member_diameter_mm=member_diameter_mm,
+                    V_des_theta=V_des_current, # Use the V_des_current for flow regime check
+                    h=h_current, # Use current height for lambda calculation
+                    typical_bay_width_m=typical_bay_width_m
+                )
 
             p = self.calculate_wind_pressure(V_des_current, C_shp_at_current_height)
             V_des_values.append(V_des_current)
@@ -1086,7 +1106,7 @@ def generate_pdf_report(inputs, results, project_number, project_name):
 
         # Second pass to build the actual PDF with correct total page count in footer
         pdf_buffer = io.BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+        doc = SimpleDocTemplate(pdf_buffer, pagespace=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
         elements = build_elements(inputs, results, project_number, project_name) # Re-build elements for final PDF
 
         def final_footer(canvas, doc):
@@ -1273,7 +1293,6 @@ def main():
                 member_diameter_mm=member_diameter_mm,
                 V_des_theta=V_des_theta_uls_ref_height,
                 h=reference_height, # Pass reference_height for lambda calculation
-                typical_bay_width_m=typical_bay_width_m # Pass typical_bay_width_m for lambda calculation
             )
         elif structure_type in ["Circular Tank", "Attached Canopy"]:
              C_shp_overall_for_table, e_for_other_types = calculator.calculate_aerodynamic_shape_factor(structure_type)
